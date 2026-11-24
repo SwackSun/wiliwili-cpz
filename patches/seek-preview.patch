@@ -1,0 +1,105 @@
+--- video_snapshot_core.cpp
++++ video_snapshot_core.cpp
+@@ -7,4 +7,5 @@
+ #include <borealis/core/logger.hpp>
+ #include <stb_image.h>
++#include <algorithm>
+ #include <cpr/cpr.h>
+
+@@ -32,6 +33,5 @@
+     snapshotTextures.assign(data.image.size(), 0);
+     snapshotLoading.assign(data.image.size(), false);
+-    // 预加载第一张精灵图
+-    loadTexture(0);
++    // Seek controls request the first visible sheet.
+ }
+
+@@ -65,16 +65,15 @@
+         return;
+     }
+-    if (index < snapshotTextures.size() && snapshotTextures[index] > 0) {
+-        return;
+-    }
+-    if (index < snapshotLoading.size() && snapshotLoading[index]) {
+-        return;
+-    }
+-
+-    while (snapshotTextures.size() <= index) snapshotTextures.push_back(0);
+-    while (snapshotLoading.size() <= index) snapshotLoading.push_back(false);
++    if (snapshotTextures[index] != 0 || std::find(snapshotLoading.begin(), snapshotLoading.end(), true) != snapshotLoading.end()) return;
+     snapshotLoading[index] = true;
+
++    // Resize the entire sprite sheet proportionally. The draw code uses normalized tile positions.
+     std::string url = bilibili::HTTP::PROTOCOL + snapshotData.image[index];
++    const int64_t w = int64_t(snapshotData.img_x_len) * snapshotData.img_x_size;
++    const int64_t h = int64_t(snapshotData.img_y_len) * snapshotData.img_y_size;
++    if (std::max(w, h) > 1200) {
++        auto query = url.find_first_of("?#");
++        url.insert(query == std::string::npos ? url.size() : query, w >= h ? "@1200w.jpg" : "@1200h.jpg");
++    }
+     int gen         = snapshotGeneration;  // 捕获当前世代，用于检测过期回调
+     brls::Logger::info("[Snapshot] loadTexture start: index={} url={} gen={}", index, url, gen);
+@@ -93,38 +92,38 @@
+         }
+         int imageW = 0, imageH = 0, n;
+-        uint8_t* imageData = stbi_load_from_memory(
+-            (unsigned char*)r.text.data(), (int)r.text.size(), &imageW, &imageH, &n, 4);
++        const auto* bytes = reinterpret_cast<const unsigned char*>(r.text.data());
++        uint8_t* imageData = nullptr;
++        // A CDN can ignore the resize suffix. Check dimensions before allocating RGBA pixels.
++        if (r.text.size() <= 4 * 1024 * 1024 &&
++            stbi_info_from_memory(bytes, int(r.text.size()), &imageW, &imageH, &n) &&
++            imageW > 0 && imageW <= 1200 && imageH > 0 && imageH <= 1200) {
++            imageData = stbi_load_from_memory(bytes, int(r.text.size()), &imageW, &imageH, &n, 4);
++        }
+         if (!imageData) {
+-            brls::Logger::error("[Snapshot] stb_image decode failed: index={} url={} gen={} stb_error={}", index, url, gen, stbi_failure_reason());
++            brls::Logger::error("[Snapshot] unsupported sheet: {}x{}", imageW, imageH);
+             brls::sync([this, gen, index]() {
+-                if (gen != snapshotGeneration) return;  // 已 reset，忽略
+-                if (index < snapshotLoading.size()) snapshotLoading[index] = false;
++                if (gen != snapshotGeneration) return;
++                snapshotLoading[index] = false;
++                snapshotTextures[index] = -1;
+             });
+             return;
+         }
+-        brls::sync([this, gen, imageData, imageW, imageH, index, url]() {
+-            NVGcontext* vg = brls::Application::getNVGContext();
+-            int tex        = nvgCreateImageRGBA(vg, imageW, imageH, 0, imageData);
+-            stbi_image_free(imageData);
++        brls::sync([this, gen, imageData, imageW, imageH, index]() {
+             if (gen != snapshotGeneration) {
+-                brls::Logger::error("[Snapshot] gen mismatch: index={} url={} gen={} curGen={}, deleting tex={}", index, url, gen, snapshotGeneration, tex);
+-                if (tex > 0) nvgDeleteImage(vg, tex);
++                stbi_image_free(imageData);
+                 return;
+             }
+-            if (tex <= 0) {
+-                brls::Logger::error("[Snapshot] nvgCreateImageRGBA failed: index={} url={} gen={} imageW={} imageH={}", index, url, gen, imageW, imageH);
++            NVGcontext* vg = brls::Application::getNVGContext();
++            for (int& tex : snapshotTextures) {
++                if (tex > 0) {
++                    nvgDeleteImage(vg, tex);
++                    tex = 0;
++                }
+             }
+-            if (index < snapshotTextures.size()) {
+-                if (snapshotTextures[index] > 0) {
+-                    brls::Logger::error("[Snapshot] duplicate tex: index={} url={} oldTex={} newTex={}, deleting new", index, url, snapshotTextures[index], tex);
+-                    if (tex > 0) nvgDeleteImage(vg, tex);
+-                } else {
+-                    snapshotTextures[index] = tex;
+-                }
+-                snapshotLoading[index] = false;
+-            } else {
+-                brls::Logger::error("[Snapshot] out-of-bounds tex: index={} url={} tex={}, deleting", index, url, tex);
+-                if (tex > 0) nvgDeleteImage(vg, tex);
+-            }
++            int tex = nvgCreateImageRGBA(vg, imageW, imageH, 0, imageData);
++            stbi_image_free(imageData);
++            snapshotTextures[index] = tex > 0 ? tex : -1;
++            snapshotLoading[index] = false;
++            brls::Logger::debug("[Snapshot] uploaded sheet {}x{}, texture {}", imageW, imageH, tex);
+         });
+     });

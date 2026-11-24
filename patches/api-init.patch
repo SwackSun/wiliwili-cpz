@@ -1,0 +1,19 @@
+--- bilibili.cpp
++++ bilibili.cpp
+@@ -33,9 +33,5 @@
+ void BilibiliClient::init(Cookies& data, std::function<void(Cookies, std::string)> callback) {
+     BilibiliClient::writeCookiesCallback = std::move(callback);
+-    for (const auto& cookie : data) {
+-        HTTP::COOKIES.emplace_back({cookie.first, cookie.second});
+-    }
+-    // Manually set cookie, because cpr's cookie algorithm does not conform to the rfc6265
+-    HTTP::HEADERS["cookie"] = HTTP::getEncodedCookie(HTTP::COOKIES);
++    HTTP::initGuest(data);
+ }
+
+@@ -47,3 +43,4 @@
+ void BilibiliClient::setTlsVerify(bool value) {
+-    HTTP::VERIFY = cpr::VerifySsl{value};
++    // The board requires certificate verification for all sessions.
++    (void)value;
+ }

@@ -1,0 +1,36 @@
+--- setting_activity.cpp
++++ setting_activity.cpp
+@@ -188,4 +188 @@
+-    btnDLNA->registerClickAction([](...) -> bool {
+-        Intent::openDLNA();
+-        return true;
+-    });
++    btnDLNA->setVisibility(brls::Visibility::GONE);
+@@ -499,18 +495,0 @@
+-    /// App Keymap
+-#if !defined(__SWITCH__) && !defined(__PSV__) && !defined(PS4)
+-    static int keyIndex = conf.getStringOptionIndex(SettingItem::KEYMAP);
+-    selectorKeymap->init("wiliwili/setting/app/others/keymap/header"_i18n,
+-                         {
+-                             "wiliwili/setting/app/others/keymap/xbox"_i18n,
+-                             "wiliwili/setting/app/others/keymap/ps"_i18n,
+-                             "wiliwili/setting/app/others/keymap/keyboard"_i18n,
+-                         },
+-                         keyIndex, [](int data) {
+-                             if (keyIndex == data) return false;
+-                             keyIndex        = data;
+-                             auto optionData = ProgramConfig::instance().getOptionData(SettingItem::KEYMAP);
+-                             ProgramConfig::instance().setSettingItem(SettingItem::KEYMAP, optionData.optionList[data]);
+-                             DialogHelper::quitApp();
+-                             return true;
+-                         });
+-#else
+@@ -518 +496,0 @@
+-#endif
+@@ -650,5 +628 @@
+-    btnTls->init("wiliwili/setting/app/network/tls"_i18n, conf.getBoolOption(SettingItem::TLS_VERIFY), [](bool data) {
+-        auto& conf = ProgramConfig::instance();
+-        conf.setSettingItem(SettingItem::TLS_VERIFY, data);
+-        conf.setTlsVerify(data);
+-    });
++    btnTls->setVisibility(brls::Visibility::GONE);

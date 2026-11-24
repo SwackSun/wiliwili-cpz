@@ -1,0 +1,10 @@
+--- home_api.cpp
++++ home_api.cpp
+@@ -228,6 +228,5 @@
+         cpr::MultiPerform multiperform;
+         for (auto& i : index_types) {
+-            auto session = HTTP::createSession();
+-            session->SetUrl(HTTP::PROTOCOL + Api::PGCIndexFilter);
++            auto session = HTTP::createApiSession(HTTP::PROTOCOL + Api::PGCIndexFilter);
+             session->SetParameters({{"type", "2"}, {"index_type", i}});
+             multiperform.AddSession(session);

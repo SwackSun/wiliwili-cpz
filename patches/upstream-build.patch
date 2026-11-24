@@ -1,0 +1,7 @@
+--- CMakeLists.txt
++++ CMakeLists.txt
+@@ -187,0 +188 @@
++list(FILTER MAIN_SRC EXCLUDE REGEX "/(api/(danmaku_live|dlna)|activity/dlna_activity|fragment/player_dlna_search|utils/dns_helper)[.]cpp$")
+@@ -328 +329 @@
+-target_link_libraries(${PROJECT_NAME} PRIVATE wiliwiliLibExtra borealis lunasvg pystring pdr mongoose z ${APP_PLATFORM_LIB})
++target_link_libraries(${PROJECT_NAME} PRIVATE wiliwiliLibExtra borealis lunasvg pystring z ${APP_PLATFORM_LIB})

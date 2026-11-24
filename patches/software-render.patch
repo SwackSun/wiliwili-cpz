@@ -1,0 +1,107 @@
+--- mpv_core.cpp
++++ mpv_core.cpp
+@@ -2,4 +2,13 @@
+ // Created by fang on 2022/8/12.
+ //
++
++#include "playback-display.hpp"
++#include <optional>
++#include <malloc.h>
++
++namespace {
++std::optional<bool> displayResume;
++}
++void cm0::setDisplayResume(bool playing) { displayResume = playing; }
+
+ #include <cstdlib>
+@@ -332,5 +341,5 @@
+         mpvSetOptionString(mpv, "vd-lavc-fast", "yes");
+         if (mpvClientApiVersion() >= MPV_MAKE_VERSION(2, 2)) {
+-            mpvSetOptionString(mpv, "profile", "fast");
++            mpvSetOptionString(mpv, "profile", "fast,sw-fast");
+         } else {
+             mpvSetOptionString(mpv, "scale", "bilinear");
+@@ -532,4 +541,5 @@
+     brls::Application::getExitEvent()->subscribe([]() { disableDimming(false); });
+
++    cm0::attachPlayer(mpv, MPVCore::LOW_QUALITY);
+     this->initializeVideo();
+ }
+@@ -542,4 +552,5 @@
+
+ void MPVCore::clean() {
++    cm0::attachPlayer(nullptr, false);
+     check_error(mpvCommandString(this->mpv, "quit"));
+
+@@ -693,4 +704,7 @@
+     const static int mpvImageFlags = 0;
+ #endif
++    cm0::setVideoFullscreen(std::abs(rect.getMinX()) < 1 && std::abs(rect.getMinY()) < 1 &&
++        std::abs(rect.getWidth() - brls::Application::contentWidth) < 2 &&
++        std::abs(rect.getHeight() - brls::Application::contentHeight) < 2);
+     int drawWidth  = rect.getWidth() * brls::Application::windowScale;
+     int drawHeight = rect.getHeight() * brls::Application::windowScale;
+@@ -705,5 +719,5 @@
+
+     if (pixels == nullptr) {
+-        pixels             = malloc(frameSize * PIXCEL_SIZE);
++        pixels             = calloc(frameSize, PIXCEL_SIZE);
+         mpv_params[3].data = pixels;
+     }
+@@ -789,4 +803,5 @@
+
+     auto *vg = brls::Application::getNVGContext();
++    if (cm0::drawVideoPlane(vg, rect.getMinX(), rect.getMinY(), rect.getWidth(), rect.getHeight(), alpha)) return;
+     nvgUpdateImage(vg, nvg_image, (const unsigned char *)pixels);
+
+@@ -923,4 +938,16 @@
+                 }
+             } break;
++            case MPV_EVENT_VIDEO_RECONFIG: {
++                // Live and legacy streams do not declare pixel dimensions in their URL response.
++                int64_t w = 0, h = 0;
++                if (mpv_get_property(mpv, "video-dec-params/w", MPV_FORMAT_INT64, &w) == 0 &&
++                    mpv_get_property(mpv, "video-dec-params/h", MPV_FORMAT_INT64, &h) == 0 &&
++                    (std::min(w,h) > 720 || std::max(w,h) > 1280)) {
++                    stop();
++                    mpv_error_code = MPV_ERROR_UNSUPPORTED;
++                    mpvCoreEvent.fire(MpvEventEnum::MPV_FILE_ERROR);
++                }
++                break;
++            }
+             case MPV_EVENT_FILE_LOADED:
+                 brls::Logger::info("========> MPV_EVENT_FILE_LOADED");
+@@ -933,5 +960,5 @@
+                 command_async("playlist-clear");
+
+-                if (AUTO_PLAY) {
++                if (displayResume.value_or(AUTO_PLAY)) {
+                     mpvCoreEvent.fire(MpvEventEnum::MPV_RESUME);
+                     this->resume();
+@@ -939,5 +966,9 @@
+                     mpvCoreEvent.fire(MpvEventEnum::MPV_PAUSE);
+                     this->pause();
++                    // Present one frame of the replacement stream, then let mpv remain paused.
++                    if (displayResume.has_value()) command_async("frame-step");
+                 }
++                if (displayResume.has_value()) malloc_trim(0);
++                displayResume.reset();
+                 break;
+             case MPV_EVENT_START_FILE:
+@@ -1171,4 +1202,5 @@
+
+ void MPVCore::setUrl(const std::string &url, const std::string &extra, const std::string &method) {
++    if (method == "replace") displayResume.reset();
+     brls::Logger::debug("{} Url: {}, extra: {}", method, url, extra);
+     if (extra.empty()) {
+@@ -1245,7 +1277,9 @@
+
+ void MPVCore::setMirror(bool value) {
++    const bool wasMirrored = MPVCore::VIDEO_MIRROR;
+     MPVCore::VIDEO_MIRROR = value;
+ #ifndef BOREALIS_USE_GXM
+-    command_async("set", "vf", value ? "hflip" : "");
++    if (value) command_async("vf", "add", "@wili-mirror:hflip");
++    else if (wasMirrored) command_async("vf", "remove", "@wili-mirror");
+     setHwdecCopyMode(value);
+ #endif

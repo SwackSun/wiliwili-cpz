@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Build target libraries in an independent sysroot with the board's existing compiler.
+set -euo pipefail
+here=$(cd -- "$(dirname -- "$0")/.." && pwd)
+repo=${1:?expected the project root}
+build=${2:?expected the application build directory}
+stage=${3:?expected the default install directory}
+sdk=$(realpath "${CM0_BUILDROOT_OUTPUT:?select a completed native-display Buildroot generation}")
+out="$build/media"
+br="$repo/vendor/sources/buildroot"
+mkdir -p "$build"
+# Buildroot stamps and CMake cache entries contain absolute compiler paths.
+# Buildroot stamps the current Git description twice, including on rootfs-only
+# refreshes. Keep every actual configuration option in the media cache key.
+signature=$( { printf '%s\n' "$sdk"; sed -e '/^# Buildroot .* Configuration$/d' -e '/^BR2_EXTERNAL_CM0_VERSION=/d' "$sdk/.config" | sha256sum; sha256sum "$here/cmake/media_defconfig"; } | sha256sum)
+# Accept an existing cache only when its legacy key matches this exact SDK.
+legacy=$( { printf '%s\n' "$sdk"; sha256sum "$sdk/.config" "$here/cmake/media_defconfig"; } | sha256sum)
+cached=$(cat "$out/.sdk-id" 2>/dev/null || true)
+if [[ -f "$out/.sdk-id" && "$cached" != "$signature" && "$cached" != "$legacy" ]]; then
+    previous=$(mktemp -d "$build/previous-sdk.XXXXXXXX")
+    mv -- "$out" "$previous/media"
+    if [[ -d "$build/device" ]]; then mv -- "$build/device" "$previous/device"; fi
+    if [[ -d "$stage" ]]; then mv -- "$stage" "$previous/install"; fi
+fi
+mkdir -p "$out"
+printf '%s\n' "$signature" >"$out/.sdk-id"
+export BR2_DL_DIR="$repo/dl/buildroot"
+{
+    cat "$here/cmake/media_defconfig"
+    printf 'BR2_PRIMARY_SITE="file://%s"\n' "$repo/vendor/downloads/buildroot"
+    printf 'BR2_GLOBAL_PATCH_DIR="%s"\n' "$here/patches/media"
+    printf 'BR2_TOOLCHAIN_EXTERNAL_PATH="%s"\n' "$sdk/host"
+    printf 'BR2_DL_DIR="%s"\n' "$BR2_DL_DIR"
+} >"$out/media_defconfig"
+make -C "$br" O="$out" BR2_DEFCONFIG="$out/media_defconfig" defconfig
+packages=(mpv libcurl webp ca-certificates mesa3d)
+brmake=(make --no-print-directory -C "$br" O="$out")
+if [[ -x "$sdk/host/bin/cmake" ]]; then
+    brmake+=(BR2_CMAKE="$sdk/host/bin/cmake")
+fi
+# Buildroot does not invalidate an already-patched package when local patches change.
+mpv_patch_id=$(sha256sum "$here"/patches/media/mpv/*.patch | sha256sum)
+if [[ $(cat "$out/.mpv-patch-id" 2>/dev/null || true) != "$mpv_patch_id" ]]; then
+    "${brmake[@]}" mpv-dirclean
+fi
+"${brmake[@]}" "${packages[@]}"
+printf '%s\n' "$mpv_patch_id" >"$out/.mpv-patch-id"
+
+# Keep notices and matching source archives for the media build, including indirect target dependencies.
+if [[ ! -f "$out/legal-info/manifest.csv" ]]; then
+    legal=$(mktemp -d "$out/legal.XXXXXXXX")
+    dependencies=$("${brmake[@]}" -s "${packages[@]/%/-show-recursive-depends}")
+    mapfile -t target_packages < <(
+        printf '%s\n' "${packages[@]}" "$dependencies" | tr ' ' '\n' |
+            awk 'NF && !/^(host-|toolchain|skeleton)/' | sort -u
+    )
+    "${brmake[@]}" LEGAL_INFO_DIR="$legal" legal-info-prepare "${target_packages[@]/%/-legal-info}"
+    mv -- "$legal" "$out/legal-info"
+fi

@@ -1,0 +1,14 @@
+--- live_danmaku_result.h
++++ live_danmaku_result.h
+@@ -14 +14 @@
+-    int ws_port;
++    int wss_port = 0;
+@@ -16 +16,7 @@
+-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LiveDanmakuHostinfo, host, ws_port);
++inline void from_json(const nlohmann::json& data, LiveDanmakuHostinfo& endpoint) {
++    endpoint.host = data.value("host", std::string{});
++    endpoint.wss_port = data.value("wss_port", 0);
++}
++inline void to_json(nlohmann::json& data, const LiveDanmakuHostinfo& endpoint) {
++    data = {{"host", endpoint.host}, {"wss_port", endpoint.wss_port}};
++}

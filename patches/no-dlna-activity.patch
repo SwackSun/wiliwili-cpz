@@ -1,0 +1,10 @@
+--- activity_helper.cpp
++++ activity_helper.cpp
+@@ -15 +14,0 @@
+-#include "activity/dlna_activity.hpp"
+@@ -117,5 +115,0 @@
+-void Intent::openDLNA() {
+-    auto activity = new DLNAActivity();
+-    brls::Application::pushActivity(activity, brls::TransitionAnimation::NONE);
+-}
+-

@@ -1,0 +1,18 @@
+--- video_detail_api.cpp
++++ video_detail_api.cpp
+@@ -294,6 +294,5 @@
+ void BilibiliClient::get_danmaku(uint64_t cid, const std::function<void(std::string)>& callback,
+                                  const ErrorCallback& error) {
+-    auto session = HTTP::createSession();
+-    session->SetUrl(cpr::Url{HTTP::PROTOCOL + Api::VideoDanmaku});
++    auto session = HTTP::createApiSession(HTTP::PROTOCOL + Api::VideoDanmaku);
+     session->SetParameters(cpr::Parameters({{"oid", std::to_string(cid)}}));
+     session->GetCallback<>(
+@@ -335,6 +334,5 @@
+                                         const std::function<void(VideoSnapshotData)>& callback,
+                                         const ErrorCallback& error) {
+-    auto session = HTTP::createSession();
+-    session->SetUrl(cpr::Url{HTTP::PROTOCOL + Api::VideoSnapshot});
++    auto session = HTTP::createApiSession(HTTP::PROTOCOL + Api::VideoSnapshot);
+     session->SetParameters(cpr::Parameters({
+         {"bvid", bvid},

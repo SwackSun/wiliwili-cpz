@@ -1,0 +1,126 @@
+--- mine_api.cpp
++++ mine_api.cpp
+@@ -7,4 +7,6 @@
+ #include <fmt/ranges.h>
+ #include "bilibili.h"
++#include "account-http.hpp"
++#include "account-policy.hpp"
+ #include "bilibili/api.h"
+ #include "bilibili/util/md5.hpp"
+@@ -33,5 +35,14 @@
+     HTTP::getResultAsync<QrLoginTokenResultV2>(
+         Api::QrLoginUrlV2, {{"source", "main_electron_pc"}},
+-        [callback](auto wrapper) { callback(wrapper.url, wrapper.qrcode_key); }, error);
++        [callback, error](auto wrapper) {
++            const auto& url = wrapper.url;
++            if (wrapper.qrcode_key.empty() ||
++                (url.rfind("https://account.bilibili.com/", 0) != 0 &&
++                 url.rfind("https://passport.bilibili.com/", 0) != 0)) {
++                ERROR_MSG("Invalid QR login response", -1);
++                return;
++            }
++            callback(url, wrapper.qrcode_key);
++        }, error);
+ }
+
+@@ -39,7 +50,8 @@
+ void BilibiliClient::get_login_info(const std::string& oauthKey, const std::function<void(enum LoginInfo)>& callback,
+                                     const ErrorCallback& error) {
++    auto generation = cm0::currentAccount().generation;
+     HTTP::_cpr_post(
+         Api::QrLoginInfo, {}, {{"oauthKey", oauthKey}},
+-        [callback, error](const cpr::Response& r) {
++        [callback, error, generation](const cpr::Response& r) {
+             try {
+                 nlohmann::json res = nlohmann::json::parse(r.text);
+@@ -47,12 +59,9 @@
+
+                 if (data.status) {
+-                    std::map<std::string, std::string> cookies;
+-                    for (auto it = r.cookies.begin(); it != r.cookies.end(); it++) {
+-                        cookies[it->GetName()] = it->GetValue();
+-                        HTTP::COOKIES.emplace_back({it->GetName(), it->GetValue()});
++                    if (!cm0::acceptLogin(generation, r.cookies, {}, {})) {
++                        ERROR_MSG("Cannot accept login", -1);
++                        return;
+                     }
+-                    if (BilibiliClient::writeCookiesCallback) {
+-                        BilibiliClient::writeCookiesCallback(cookies, "");
+-                    }
++                    if (BilibiliClient::writeCookiesCallback) BilibiliClient::writeCookiesCallback({}, {});
+                 }
+
+@@ -61,6 +70,4 @@
+             } catch (const std::exception& e) {
+                 ERROR_MSG("API error", -1);
+-                printf("data: %s\n", r.text.c_str());
+-                printf("ERROR: %s\n", e.what());
+             }
+         },
+@@ -73,5 +80,6 @@
+     auto uuid   = BilibiliClient::genRandomUuid();
+
+-    HTTP::COOKIES = {{{"appkey", BILIBILI_APP_KEY},
++    auto generation = cm0::currentAccount().generation;
++    const cpr::Cookies deviceCookies = {{{"appkey", BILIBILI_APP_KEY},
+                       {"mobi_app", "pc_electron"},
+                       {"device", "mac"},
+@@ -81,29 +89,21 @@
+                       {"device_name", deviceName}},
+                      false};
+-    // Manually set cookie, because cpr's cookie algorithm does not conform to the rfc6265
+-    HTTP::HEADERS["cookie"] = HTTP::getEncodedCookie(HTTP::COOKIES);
+-
+     HTTP::_cpr_get(
+         Api::QrLoginInfoV2, {{"qrcode_key", qrcodeKey}, {"source", "main_electron_pc"}},
+-        [callback, error, uuid](const cpr::Response& r) {
++        [callback, error, uuid, generation, qrcodeKey](const cpr::Response& r) {
+             try {
+-                HTTP::COOKIES      = {false};
+                 nlohmann::json res = nlohmann::json::parse(r.text);
+-                auto data          = res.at("data").get<QrLoginInfoResultV2>();
++                if (res.at("code").get<int>() != 0) {
++                    ERROR_MSG("QR login unavailable", -1);
++                    return;
++                }
++                auto data = res.at("data").get<QrLoginInfoResultV2>();
+                 if (data.status) {
+-                    std::map<std::string, std::string> cookies;
+-                    cookies["_uuid"] = uuid;
+-                    HTTP::COOKIES.emplace_back({"_uuid", cookies["_uuid"]});
+-                    cookies["buvid3"] = BilibiliClient::genRandomBuvid3();
+-                    HTTP::COOKIES.emplace_back({"buvid3", cookies["buvid3"]});
+-                    for (const auto& cookie : r.cookies) {
+-                        cookies[cookie.GetName()] = cookie.GetValue();
+-                        HTTP::COOKIES.emplace_back({cookie.GetName(), cookie.GetValue()});
++                    cm0::CookieMap cookies{{"_uuid", uuid}, {"buvid3", BilibiliClient::genRandomBuvid3()}};
++                    if (!cm0::acceptLogin(generation, r.cookies, data.refresh_token, std::move(cookies), qrcodeKey)) {
++                        ERROR_MSG("Cannot accept login", -1);
++                        return;
+                     }
+-                    // Manually set cookie, because cpr's cookie algorithm does not conform to the rfc6265
+-                    HTTP::HEADERS["cookie"] = HTTP::getEncodedCookie(HTTP::COOKIES);
+-                    if (BilibiliClient::writeCookiesCallback) {
+-                        BilibiliClient::writeCookiesCallback(cookies, data.refresh_token);
+-                    }
++                    if (BilibiliClient::writeCookiesCallback) BilibiliClient::writeCookiesCallback({}, {});
+                 }
+
+@@ -112,9 +112,7 @@
+             } catch (const std::exception& e) {
+                 ERROR_MSG("API error", -1);
+-                printf("data: %s\n", r.text.c_str());
+-                printf("ERROR: %s\n", e.what());
+             }
+         },
+-        error);
++        error, &deviceCookies);
+ }
+
+@@ -364,5 +362,5 @@
+
+ void BilibiliClient::get_unix_time(const std::function<void(UnixTimeResult)>& callback, const ErrorCallback& error) {
+-    HTTP::getResultAsync<UnixTimeResult>(Api::UnixTime, {}, callback, error);
++    HTTP::getResultAsync<UnixTimeResult>(cm0::clockUrl, {}, callback, error);
+ }
+ }  // namespace bilibili

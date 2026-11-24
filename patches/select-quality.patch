@@ -1,0 +1,105 @@
+--- player_base_activity.cpp
++++ player_base_activity.cpp
+@@ -4,4 +4,6 @@
+
+ #include <utility>
++#include "video-quality.hpp"
++#include "playback-display.hpp"
+ #include <borealis/core/thread.hpp>
+ #include <borealis/core/touch/tap_gesture.hpp>
+@@ -448,5 +450,5 @@
+     if (!this->videoUrlResult.dash.video.empty()) {
+         // dash格式的视频无需重复请求视频链接，这里简单的设置清晰度即可
+-        videoUrlResult.quality = BasePlayerActivity::defaultQuality;
++        videoUrlResult.quality = cm0::outputVideoQuality(defaultQuality, cm0::usingLcd());
+         this->onVideoPlayUrl(videoUrlResult);
+         return;
+@@ -464,8 +466,12 @@
+     if (this->videoUrlResult.accept_description.empty()) return;
+
++    const auto choices = videoUrlResult.accept_quality;
++    const auto saved = std::find(choices.begin(), choices.end(), defaultQuality);
++    const int selectedIndex = saved == choices.end() ? getQualityIndex() : static_cast<int>(saved - choices.begin());
+     auto* dropdown = new BaseDropdown(
+         "wiliwili/player/quality"_i18n,
+-        [this](int selected) {
+-            int code                           = this->videoUrlResult.accept_quality[selected];
++        [this, choices](int selected) {
++            if (selected < 0 || static_cast<size_t>(selected) >= choices.size()) return;
++            int code = choices[selected];
+ #ifdef __PSV__
+             if (code > 64) {
+@@ -482,7 +488,7 @@
+             }
+
+-            this->updateVideoLink();
++            refreshOutputQuality(dynamic_cast<PlayerSeasonActivity*>(this) != nullptr);
+         },
+-        getQualityIndex());
++        selectedIndex);
+     auto* recycler = dropdown->getRecyclingList();
+     recycler->registerCell("Cell", []() { return new QualityCell(); });
+@@ -535,5 +541,11 @@
+
+     // 获取预设的跳转位置
+-    int start    = this->getProgress();
++    auto& mpv = MPVCore::instance();
++    double position = 0;
++    const bool resumeHere = switchingDisplayStream &&
++        mpv_get_property(mpv.getHandle(), "time-pos", MPV_FORMAT_DOUBLE, &position) >= 0;
++    const bool playing = resumeHere && !mpv.isPaused();
++    int start = resumeHere ? static_cast<int>(position) : this->getProgress();
++    if (resumeHere) this->setProgress(start);
+     int end      = -1;
+     int clipOpen = result.clipOpen, clipEnd = result.clipEnd;
+@@ -567,5 +579,5 @@
+
+     // 当要跳转的进度距离尾部只有 5s，就重新播放
+-    if (start > 0 && abs(time_sec - start) <= 5) start = 0;
++    if (!resumeHere && start > 0 && abs(time_sec - start) <= 5) start = 0;
+
+     // 跳过片头片尾
+@@ -598,19 +610,14 @@
+         brls::Logger::debug("Video type: dash");
+
+-        // 找到当前可用的清晰度
+-        for (const auto& i : result.dash.video) {
+-            int desiredQuality = result.quality;
+-            // 若设置了过高的清晰度, 自动切换到合适的清晰度, 默认为 128 (即无限制)
+-            if (i.height > i.width) {
+-                desiredQuality = std::min(desiredQuality, portraitQualityMax);
+-            } else {
+-                desiredQuality = std::min(desiredQuality, landscapeQualityMax);
+-            }
+-
+-            if (desiredQuality >= i.id) {
+-                videoUrlResult.quality = i.id;
+-                break;
+-            }
+-        }
++        int selected = 0;
++        for (const auto& stream : result.dash.video) {
++            int maxQuality = stream.height > stream.width ? portraitQualityMax : landscapeQualityMax;
++            if (stream.id <= std::min(result.quality, maxQuality)) selected = std::max(selected, stream.id);
++        }
++        if (!selected) {
++            this->onError("没有符合当前画质限制的视频流");
++            return;
++        }
++        videoUrlResult.quality = selected;
+
+         // 找到当前清晰度下可用的视频
+@@ -709,4 +716,6 @@
+     }
+
++    if (resumeHere) cm0::setDisplayResume(playing);
++
+     // 设置mpv事件
+     // 1.更新清晰度
+@@ -728,5 +737,5 @@
+
+     // 根据配置决定是否自动全屏
+-    if (ProgramConfig::instance().getBoolOption(SettingItem::PLAYER_AUTO_FULLSCREEN) &&
++    if (!switchingDisplayStream && ProgramConfig::instance().getBoolOption(SettingItem::PLAYER_AUTO_FULLSCREEN) &&
+         !this->video->isFullscreen()) {
+         this->video->setFullScreen(true);

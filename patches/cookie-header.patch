@@ -1,0 +1,22 @@
+--- http.cpp
++++ http.cpp
+@@ -9,8 +9,15 @@
+ std::string HTTP::getEncodedCookie(const cpr::Cookies& cookies) {
+     std::stringstream stream;
+-    for (auto it = cookies.begin(); it != cookies.end(); ++it) {
+-        const cpr::Cookie& item = *it;
+-        stream << item.GetName() << "=" << item.GetValue();
+-        if (std::next(it) != cookies.end()) stream << "; ";
++    bool first = true;
++    for (const auto& item : cookies) {
++        auto name = item.GetName();
++        auto value = item.GetValue();
++        if (name.empty() || name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos)
++            continue;
++        if (std::any_of(value.begin(), value.end(), [](unsigned char c) { return c < 32 || c == 127 || c == ';'; }))
++            continue;
++        if (!first) stream << "; ";
++        stream << name << "=" << value;
++        first = false;
+     }
+     return stream.str();

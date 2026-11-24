@@ -1,0 +1,76 @@
+--- /dev/null
++++ b/include/mpv/cm0_frame.h
+@@ -0,0 +1,17 @@
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#pragma once
++#include <stdint.h>
++
++// Private render parameter for this board's libmpv. Return zero to let the
++// software renderer handle the frame normally. All pointers are borrowed.
++#include "render.h"
++struct mpv_cm0_frame {
++    int width, height;
++    int nv12, bt709, full_range;
++    uint8_t *const *planes;
++    const int *stride;
++    int src[4], dst[4]; // x0,y0,x1,y1 in video and SW target pixels
++};
++struct mpv_cm0_present {
++    int (*present)(const struct mpv_cm0_frame *);
++};
+--- a/include/mpv/render.h
++++ b/include/mpv/render.h
+@@ -423,4 +423,6 @@
+      */
+     MPV_RENDER_PARAM_SW_POINTER = 20,
++    // Board-private callback for decoded frame presentation.
++    MPV_CM0_FRAME_PARAM = 0x434d30,
+ } mpv_render_param_type;
+
+--- a/meson.build
++++ b/meson.build
+@@ -1777,5 +1777,5 @@
+
+     headers = ['include/mpv/client.h', 'include/mpv/render.h',
+-               'include/mpv/render_gl.h', 'include/mpv/stream_cb.h']
++               'include/mpv/cm0_frame.h', 'include/mpv/render_gl.h', 'include/mpv/stream_cb.h']
+     install_headers(headers, subdir: 'mpv')
+
+--- a/video/out/libmpv_sw.c
++++ b/video/out/libmpv_sw.c
+@@ -1,5 +1,7 @@
+ #include "mpv/render_gl.h"
++#include "mpv/cm0_frame.h"
+ #include "libmpv.h"
+ #include "sub/osd.h"
++#include "sub/draw_bmp.h"
+ #include "video/sws_utils.h"
+
+@@ -106,4 +108,27 @@
+     if (!sz || !fmt || !stride || !ptr)
+         return MPV_ERROR_INVALID_PARAMETER;
++
++    struct mpv_cm0_present *sink = get_mpv_render_param(params, MPV_CM0_FRAME_PARAM, NULL);
++    struct mp_image *video = frame->current;
++    if (sink && video && (video->imgfmt == IMGFMT_420P || video->imgfmt == IMGFMT_NV12) &&
++        !video->params.rotate &&
++        (video->params.repr.sys == PL_COLOR_SYSTEM_BT_709 || video->params.repr.sys == PL_COLOR_SYSTEM_BT_601)) {
++        struct mpv_cm0_frame view = {
++            .width = video->w, .height = video->h, .nv12 = video->imgfmt == IMGFMT_NV12,
++            .bt709 = video->params.repr.sys == PL_COLOR_SYSTEM_BT_709,
++            .full_range = video->params.repr.levels == PL_COLOR_LEVELS_FULL,
++            .planes = video->planes, .stride = video->stride,
++            .src = {p->src_rc.x0, p->src_rc.y0, p->src_rc.x1, p->src_rc.y1},
++            .dst = {p->dst_rc.x0, p->dst_rc.y0, p->dst_rc.x1, p->dst_rc.y1},
++        };
++        // The application draws its controls separately. If libmpv also has
++        // subtitles or OSD to paint, keep its normal compositing path.
++        struct sub_bitmap_list *osd = p->osd ?
++            osd_render(p->osd, p->osd_rc, video->pts, 0, mp_draw_sub_formats) : NULL;
++        bool needs_osd = osd && osd->num_items;
++        talloc_free(osd);
++        if (!needs_osd && sink->present(&view))
++            return 0;
++    }
+
+     char *prev_fmt = mp_imgfmt_to_name(p->dst_params.imgfmt);

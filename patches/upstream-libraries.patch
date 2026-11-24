@@ -1,0 +1,21 @@
+--- CMakeLists.txt
++++ CMakeLists.txt
+@@ -97,10 +96,0 @@
+-# add mongoose
+-if (USE_SYSTEM_MONGOOSE)
+-    find_library(MONGOOSE_LIBRARY NAMES mongoose REQUIRED)
+-    add_library(mongoose UNKNOWN IMPORTED)
+-    set_property(TARGET mongoose PROPERTY IMPORTED_LOCATION ${MONGOOSE_LIBRARY})
+-else ()
+-    set(MG_ENABLE_IPV6 ON)
+-    add_subdirectory(mongoose EXCLUDE_FROM_ALL)
+-endif ()
+-
+@@ -116,7 +105,0 @@
+-# add libpdr (不使用 pdr 项目内的 cmake 配置，因为其内的 mongoose 不支持 psv/switch)
+-file(GLOB_RECURSE PDR_SRC ${CMAKE_CURRENT_SOURCE_DIR}/libpdr/src/*.cpp)
+-add_library(pdr ${PDR_SRC})
+-set_property(TARGET pdr PROPERTY CXX_STANDARD 17)
+-target_include_directories(pdr PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libpdr/include)
+-target_link_libraries(pdr mongoose tinyxml2)
+-

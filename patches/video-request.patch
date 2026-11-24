@@ -1,0 +1,53 @@
+--- video_detail.hpp
++++ video_detail.hpp
+@@ -7,5 +7,5 @@
+ #include <borealis/core/event.hpp>
+
+-#include "presenter.h"
++#include "presenter/presenter.h"
+ #include "bilibili.h"
+ #include "bilibili/result/video_detail_result.h"
+@@ -64,5 +64,5 @@
+      * @param requestHistoryInfo 是否获取历史播放进度
+      */
+-    void requestVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo = true);
++    void requestVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo = true, bool refreshStreamOnly = false);
+
+     /**
+@@ -70,5 +70,5 @@
+      * @param requestHistoryInfo 是否获取历史播放进度
+      */
+-    void requestSeasonVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo = true);
++    void requestSeasonVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo = true, bool refreshStreamOnly = false);
+
+     /// 获取投屏地址
+@@ -138,5 +138,29 @@
+     static inline int portraitQualityMax = 128;
+
++    void refreshOutputQuality(bool season);
++    bool mediaListReady(bool season) const {
++        if (season) return !episodeList.empty() && episodeResult.id != 0;
++        return !videoDetailResult.pages.empty() && videoDetailPage.page > 0 &&
++               videoDetailPage.page <= videoDetailResult.pages.size();
++    }
++    int previousMediaPart(bool season) const {
++        if (season) {
++            auto i = episodeResult.index;
++            if (i > 0 && size_t(i) < episodeList.size() && episodeList[i-1].id) return int(i)-1;
++        } else if (videoDetailPage.page > 1) return int(videoDetailPage.page)-2;
++        return -1;
++    }
++    std::string previousCollectionVideo() const {
++        const auto& list = videoDetailResult.ugc_season;
++        for (int i = list.currentIndex-1; i >= 0 && size_t(i) < list.episodes.size(); --i)
++            if (!list.episodes[i].bvid.empty()) return list.episodes[i].bvid;
++        return {};
++    }
++
+ protected:
++    uint64_t loadedStreamCid = 0;
++    uint64_t streamRequestId = 0;
++    int requestedStreamQuality = 0;
++    bool switchingDisplayStream = false;
+     bilibili::VideoDetailResult videoDetailResult;       //  视频数据
+     bilibili::VideoDetailPage videoDetailPage;           // 视频分P数据

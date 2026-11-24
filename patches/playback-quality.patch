@@ -1,0 +1,223 @@
+--- config_helper.cpp
++++ config_helper.cpp
+@@ -21,4 +21,7 @@
+
+ #include "bilibili.h"
++#include "account-http.hpp"
++#include "private-settings.hpp"
++#include "video-quality.hpp"
+ #include "utils/number_helper.hpp"
+ #include "utils/thread_helper.hpp"
+@@ -98,6 +101,6 @@
+ #define WILI_DNS_CACHE_TIMEOUT 3600000
+ #else
+-// 默认清晰度 (116 为 1080P@60)
+-#define WILI_VIDEO_QUALITY_DEFAULT 116
++// Guests are limited separately below. Preserve the saved tier for returning viewers.
++#define WILI_VIDEO_QUALITY_DEFAULT 64
+ // 横屏视频最高清晰度 (127 为 8K, 128 即无限制)
+ #define WILI_VIDEO_QUALITY_LANDSCAPE_MAX 128
+@@ -145 +148 @@
+-    {SettingItem::KEYMAP, {"keymap", {"xbox", "ps", "keyboard"}, {}, 0}},
++    {SettingItem::KEYMAP, {"keymap", {"keyboard"}, {}, 0}},
+@@ -242,5 +245,5 @@
+     {SettingItem::PLAYER_VOLUME, {"player_volume", {}, {}, 0}},
+     {SettingItem::TEXTURE_CACHE_NUM, {"texture_cache_num", {}, {}, 0}},
+-    {SettingItem::VIDEO_QUALITY, {"video_quality", {}, {}, 116}},
++    {SettingItem::VIDEO_QUALITY, {"video_quality", {}, {}, WILI_VIDEO_QUALITY_DEFAULT}},
+     {SettingItem::VIDEO_QUALITY_LANDSCAPE_MAX, {"video_quality_landscape_max", {}, {}, 128}},
+     {SettingItem::VIDEO_QUALITY_PORTRAIT_MAX, {"video_quality_portrait_max", {}, {}, 128}},
+@@ -254,5 +257,5 @@
+       {"1", "2", "3", "4", "8", "12", "16"},
+       {1, 2, 3, 4, 8, 12, 16},
+-      3}},
++      1}},
+ #endif
+     {SettingItem::VIDEO_FORMAT, {"file_format", {"Dash (AVC/HEVC/AV1)", "FLV/MP4"}, {4048, 0}, 0}},
+@@ -329,14 +332,18 @@
+     this->searchHistory = conf.searchHistory;
+     this->seasonCustom  = conf.seasonCustom;
+-    brls::Logger::info("setting: {}", conf.setting.dump());
++
+ }
+
+ void ProgramConfig::setCookie(const Cookie& data) {
+-    this->cookie = data;
+-    if (data.empty()) this->refreshToken.clear();
+-    this->save();
++    auto previous = cm0::currentAccount();
++    cm0::Account next;
++    next.cookies = data;
++    if (!cm0::saveAccount(previous.generation, std::move(next)))
++        throw std::runtime_error("Account changed while saving cookies");
+ }
+
+ Cookie ProgramConfig::getCookie() {
++    auto account = cm0::validCookies(cm0::currentAccount());
++    if (!account.empty()) return account;
+     // 生成虚假的 buvid3，在获取直播分区时需要此字段
+     // buvid3 不应以 infoc 结尾，否则会报错误码 352
+@@ -391,29 +398,28 @@
+
+ void ProgramConfig::setRefreshToken(const std::string& token) {
+-    this->refreshToken = token;
+-    this->save();
+-}
+-
+-std::string ProgramConfig::getRefreshToken() const { return this->refreshToken; }
++    auto account = cm0::currentAccount();
++    account.refresh = token;
++    if (!cm0::saveAccount(account.generation, account))
++        throw std::runtime_error("Account changed while saving refresh token");
++}
++
++std::string ProgramConfig::getRefreshToken() const { return cm0::currentAccount().refresh; }
+
+ std::string ProgramConfig::getCSRF() {
+-    if (this->cookie.count("bili_jct") == 0) {
+-        return "";
+-    }
+-    return this->cookie["bili_jct"];
++    const auto cookies = getCookie();
++    auto it = cookies.find("bili_jct");
++    return it == cookies.end() ? "" : it->second;
+ }
+
+ std::string ProgramConfig::getUserID() {
+-    if (this->cookie.count("DedeUserID") == 0) {
+-        return "";
+-    }
+-    return this->cookie["DedeUserID"];
++    const auto cookies = getCookie();
++    auto it = cookies.find("DedeUserID");
++    return it == cookies.end() ? "" : it->second;
+ }
+
+ std::string ProgramConfig::getUuID() {
+-    if (this->cookie.count("_uuid") == 0) {
+-        return "";
+-    }
+-    return this->cookie["_uuid"];
++    const auto cookies = getCookie();
++    auto it = cookies.find("_uuid");
++    return it == cookies.end() ? "" : it->second;
+ }
+
+@@ -484,16 +490,23 @@
+     const std::string path = this->getConfigDir() + "/wiliwili_config.json";
+
++    nlohmann::json content = nlohmann::json::object();
+     std::ifstream readFile(path);
+     if (readFile) {
+-        try {
+-            nlohmann::json content;
+-            readFile >> content;
+-            readFile.close();
+-            this->setProgramConfig(content.get<ProgramConfig>());
+-        } catch (const std::exception& e) {
+-            brls::Logger::error("ProgramConfig::load: {}", e.what());
+-        }
+-        brls::Logger::info("Load config from: {}", path);
+-    }
++        // Do not include input bytes from parse errors in the log.
++        content = nlohmann::json::parse(readFile, nullptr, false);
++        if (!content.is_object()) throw std::runtime_error("Cannot read wiliwili settings");
++    }
++    cm0::Account legacy;
++    if (content.contains("cookie") && content["cookie"].is_object())
++        legacy.cookies = content["cookie"].get<Cookie>();
++    legacy.refresh = content.value("refreshToken", std::string{});
++    const char* dataHome = getenv("XDG_DATA_HOME");
++    cm0::loadAccount(getConfigDir(), dataHome && *dataHome ? dataHome : getHomePath() + "/.local/share", std::move(legacy));
++    const bool migrated = content.contains("cookie") || content.contains("refreshToken");
++    content.erase("cookie");
++    content.erase("refreshToken");
++    if (migrated && !cm0::writeSettings(path, content.dump(2)))
++        throw std::runtime_error("Cannot finish migrating account settings");
++    this->setProgramConfig(content.get<ProgramConfig>());
+
+     // 初始化代理
+@@ -503,9 +516,9 @@
+     if (http_proxy) {
+         this->httpProxy = http_proxy;
+-        brls::Logger::info("Load http proxy from env: {}", this->httpProxy);
++        brls::Logger::info("Load HTTP proxy from environment");
+     }
+     if (https_proxy) {
+         this->httpsProxy = https_proxy;
+-        brls::Logger::info("Load https proxy from env: {}", this->httpsProxy);
++        brls::Logger::info("Load HTTPS proxy from environment");
+     }
+     // 如果设置开启了自定义代理，则读取配置文件中的代理设置
+@@ -561,6 +574,6 @@
+
+     // 初始化视频清晰度
+-    VideoDetail::defaultQuality = getSettingItem(SettingItem::VIDEO_QUALITY,
+-                                                 WILI_VIDEO_QUALITY_DEFAULT);
++    VideoDetail::defaultQuality = std::min(cm0::maxVideoQuality, getSettingItem(SettingItem::VIDEO_QUALITY,
++                                                 WILI_VIDEO_QUALITY_DEFAULT));
+     if (!hasLoginInfo()) {
+         // 用户未登录时跟随官方将默认清晰度设置到 360P
+@@ -784,5 +797,5 @@
+         brls::TextureCache::instance().cache.setCapacity(1);
+ #else
+-        brls::TextureCache::instance().cache.setCapacity(getSettingItem(SettingItem::TEXTURE_CACHE_NUM, 200));
++        brls::TextureCache::instance().cache.setCapacity(getSettingItem(SettingItem::TEXTURE_CACHE_NUM, 24));
+ #endif
+
+@@ -905,11 +918,10 @@
+ #endif
+     nlohmann::json content(*this);
+-    std::ofstream writeFile(path);
+-    if (!writeFile) {
++    content.erase("cookie");
++    content.erase("refreshToken");
++    if (!cm0::writeSettings(path, content.dump(2))) {
+         brls::Logger::error("Cannot write config to: {}", path);
+         return;
+     }
+-    writeFile << content.dump(2);
+-    writeFile.close();
+     brls::Logger::info("Write config to: {}", path);
+ }
+@@ -1077,18 +1089,4 @@
+-        // 自定义字体不存在，使用内置字体
+-#if defined(__PSV__) || defined(PS4)
+-        brls::FontLoader::USER_ICON_PATH = BRLS_ASSET("font/keymap_ps.ttf");
+-#else
+-        std::string icon = getSettingItem(SettingItem::KEYMAP, std::string{"xbox"});
+-        if (icon == "xbox") {
+-            brls::FontLoader::USER_ICON_PATH = BRLS_ASSET("font/keymap_xbox.ttf");
+-        } else if (icon == "ps") {
+-            brls::FontLoader::USER_ICON_PATH = BRLS_ASSET("font/keymap_ps.ttf");
+-        } else {
+-            brls::Application::setHintsLiteMode(true);
+-            if (getBoolOption(SettingItem::APP_SWAP_ABXY)) {
+-                brls::FontLoader::USER_ICON_PATH = BRLS_ASSET("font/keymap_keyboard_swap.ttf");
+-            } else {
+-                brls::FontLoader::USER_ICON_PATH = BRLS_ASSET("font/keymap_keyboard.ttf");
+-            }
+-        }
+-#endif
++        brls::Application::setHintsLiteMode(true);
++        brls::FontLoader::USER_ICON_PATH = getBoolOption(SettingItem::APP_SWAP_ABXY)
++            ? BRLS_ASSET("font/keymap_keyboard_swap.ttf")
++            : BRLS_ASSET("font/keymap_keyboard.ttf");
+@@ -1105,10 +1103,8 @@
+     BILI::init(
+         diskCookie,
+-        [](const Cookie& newCookie, const std::string& token) {
+-            brls::Logger::info("======== write cookies to disk");
+-            ProgramConfig::instance().setCookie(newCookie);
+-            ProgramConfig::instance().setRefreshToken(token);
++        [](const Cookie&, const std::string&) {
+             // 用户重新登录后，恢复默认清晰度设置
+-            VideoDetail::defaultQuality = WILI_VIDEO_QUALITY_DEFAULT;
++            VideoDetail::defaultQuality = std::min(cm0::maxVideoQuality, ProgramConfig::instance().getSettingItem(
++                SettingItem::VIDEO_QUALITY, WILI_VIDEO_QUALITY_DEFAULT));
+         });
+     BILI::setProxy(httpProxy, httpsProxy);
+@@ -1118,2 +1114,3 @@
+     BILI::setDnsCacheTimeout(getSettingItem(SettingItem::HTTP_DNS_CACHE_TIMEOUT, WILI_DNS_CACHE_TIMEOUT));
++    cm0::checkAccount();
+ }

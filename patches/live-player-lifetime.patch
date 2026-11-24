@@ -1,0 +1,98 @@
+--- live_player_activity.cpp
++++ live_player_activity.cpp
+@@ -388,7 +388,6 @@
+-    // 保存必要的状态
+-    auto state = this->threadState;
+-    auto room_id_copy = roomid;
+-    auto emoticonsPtr = std::make_shared<lmp>();
+-
+-    // 使用cpr::async在后台线程执行任务
+-    cpr::async([state, room_id_copy, emoticonsPtr, info, this]() {
++    auto state = threadState;
++    cpr::async([state, roomid, info, this]() {
++        if (!state->isActive.load(std::memory_order_acquire))
++            return;
++
++        std::shared_ptr<lmp> emoticons;
+@@ -396,3 +395,7 @@
+-            // 检查活动状态
+-            if (!state->isActive.load(std::memory_order_acquire)) {
+-                brls::Logger::debug("LiveActivity: 线程中断: 对象已被销毁");
++            emoticons = std::make_shared<lmp>(dl_emoticon(roomid));
++        } catch (const std::exception&) {
++            brls::Logger::warning("Unable to load live chat emoticons");
++        }
++
++        brls::sync([state, roomid, info, emoticons = std::move(emoticons), this]() {
++            if (!state->isActive.load(std::memory_order_acquire))
+@@ -400,16 +403,3 @@
+-            }
+-
+-            // 在线程中安全地访问表情包映射
+-            *emoticonsPtr = dl_emoticon(room_id_copy);
+-            brls::Logger::debug("LiveActivity: 获取了 {} 个表情包URL", emoticonsPtr->size());
+-
+-            // 将表情包映射传递给LiveDanmakuCore
+-            LiveDanmakuCore::instance().setEmoticons(emoticonsPtr);
+-
+-            // 再次检查活动状态
+-            if (!state->isActive.load(std::memory_order_acquire)) {
+-                brls::Logger::debug("LiveActivity: 线程中断: 对象已被销毁");
+-                return;
+-            }
+-
+-            // 设置消息回调,捕获共享状态
++            if (emoticons)
++                LiveDanmakuCore::instance().setEmoticons(emoticons);
++
+@@ -417,3 +407 @@
+-                // 检查活动状态
+-                if (!state->isActive.load(std::memory_order_acquire)) {
+-                    brls::Logger::debug("LiveActivity: 消息回调中断: 对象已被销毁");
++                if (!state->isActive.load(std::memory_order_acquire))
+@@ -421,8 +409,2 @@
+-                }
+-
+-                ASYNC_RETAIN
+-                // 使用brls::sync确保在UI线程中更新UI
+-                brls::sync([state, msg, ASYNC_TOKEN]() {
+-                    ASYNC_RELEASE
+-                    if (!state->isActive.load(std::memory_order_acquire)) {
+-                        brls::Logger::debug("LiveActivity: UI更新中断: 对象已被销毁");
++                brls::sync([state, msg, this]() {
++                    if (!state->isActive.load(std::memory_order_acquire))
+@@ -430,2 +412 @@
+-                    }
+-
++
+@@ -484,7 +465,8 @@
+-
+-            // 连接弹幕服务器
+-            this->danmaku.connect(room_id_copy, std::stoll(ProgramConfig::instance().getUserID()), info);
+-
+-        } catch (const std::exception& e) {
+-            brls::Logger::error("LiveActivity: 弹幕处理错误: {}", e.what());
+-        }
++
++            try {
++                const auto uid = ProgramConfig::instance().getUserID();
++                this->danmaku.connect(roomid, uid.empty() ? 0 : std::stoull(uid), info);
++            } catch (const std::exception&) {
++                brls::Logger::warning("Unable to start live chat");
++            }
++        });
+@@ -1017 +998,0 @@
+-    ASYNC_RETAIN
+@@ -1021 +1002 @@
+-        [state, ASYNC_TOKEN](const bilibili::LiveHistoryDanmakuData& data) {
++        [state, this](const bilibili::LiveHistoryDanmakuData& data) {
+@@ -1027 +1007,0 @@
+-                ASYNC_RELEASE
+@@ -1033,2 +1013 @@
+-            brls::sync([state, dan_list = std::move(dan_list), ASYNC_TOKEN]() mutable {
+-                ASYNC_RELEASE
++            brls::sync([state, dan_list = std::move(dan_list), this]() mutable {
+@@ -1040,2 +1019 @@
+-        [ASYNC_TOKEN](BILI_ERR) {
+-            ASYNC_RELEASE
++        [](BILI_ERR) {

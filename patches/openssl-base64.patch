@@ -1,0 +1,47 @@
+--- string_helper.cpp
++++ string_helper.cpp
+@@ -11 +11,2 @@
+-#include <mongoose.h>
++#include <limits>
++#include <openssl/evp.h>
+@@ -20,9 +21,6 @@
+-    size_t in_len  = data.size();
+-    size_t out_len = ((in_len / 3) + (in_len % 3 ? 1 : 0)) * 4 + 1;
+-    std::unique_ptr<char[]> buf(new char[out_len]);
+-    const auto *in = reinterpret_cast<const unsigned char*>(data.c_str());
+-    size_t encoded_len = mg_base64_encode(in, in_len, buf.get(), out_len);
+-    std::string out;
+-    if (encoded_len > 0) {
+-        out.assign(buf.get(), encoded_len);
+-    }
++    if (data.empty() || data.size() > static_cast<size_t>(std::numeric_limits<int>::max() / 4 * 3))
++        return {};
++    std::string out(4 * ((data.size() + 2) / 3) + 1, '\0');
++    int length = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(out.data()),
++                                 reinterpret_cast<const unsigned char*>(data.data()), data.size());
++    out.resize(length);
+@@ -34,2 +32 @@
+-    size_t in_len = input.size();
+-    if (in_len % 4 != 0) { // "Input data size is not a multiple of 4"
++    if (input.empty() || input.size() % 4 || input.size() > std::numeric_limits<int>::max())
+@@ -37,9 +34,11 @@
+-    }
+-    size_t out_len = in_len / 4 * 3 + 1;
+-    std::unique_ptr<char[]> buf(new char[out_len]);
+-    size_t decoded_len = mg_base64_decode(input.c_str(), input.size(), buf.get(), out_len);
+-    if (decoded_len > 0) {
+-        out.assign(buf.get(), decoded_len);
+-        return 0;
+-    }
+-    return -1;
++    auto padding = input.back() == '=' ? (input[input.size() - 2] == '=' ? 2 : 1) : 0;
++    if (input.find('=') < input.size() - padding)
++        return -1;
++    std::string decoded(input.size() / 4 * 3, '\0');
++    int length = EVP_DecodeBlock(reinterpret_cast<unsigned char*>(decoded.data()),
++                                 reinterpret_cast<const unsigned char*>(input.data()), input.size());
++    if (length <= padding)
++        return -1;
++    decoded.resize(length - padding);
++    out = std::move(decoded);
++    return 0;

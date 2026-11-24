@@ -1,0 +1,7 @@
+/build/
+/upstream/
+/dl/
+/vendor/downloads/
+/vendor/sources/
+/buildroot-*.tar.gz
+*.ipk

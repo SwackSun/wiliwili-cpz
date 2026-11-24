@@ -1,0 +1,17 @@
+--- mine_tab.cpp
++++ mine_tab.cpp
+@@ -8,4 +8,5 @@
+
+ #include "fragment/mine_tab.hpp"
++#include "account-logout.hpp"
+ #include "fragment/mine_qr_login.hpp"
+ #include "utils/image_helper.hpp"
+@@ -149,7 +150,5 @@
+             });
+             dialog->addButton("hints/ok"_i18n, []() {
+-                ProgramConfig::instance().setCookie({});
+-                brls::Application::getPlatform()->exitToHomeMode(false);
+-                Application::quit();
++                cm0::logout();
+             });
+             dialog->open();

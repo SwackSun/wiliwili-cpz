@@ -1,0 +1,27 @@
+--- live_data.cpp
++++ live_data.cpp
+@@ -15,5 +15,5 @@
+     ASYNC_RETAIN
+     BILI::get_live_room_play_info(
+-        roomid, defaultQuality,
++        roomid, defaultQuality > 0 ? std::min(defaultQuality, 150) : 150,
+         [ASYNC_TOKEN](const auto& result) {
+             liveRoomPlayInfo = result;
+@@ -39,4 +39,6 @@
+             for (auto& i : format.codec) {
+                 liveUrl = i;
++                auto& offered = liveUrl.accept_qn;
++                offered.erase(std::remove_if(offered.begin(), offered.end(), [](int qn) { return qn > 150; }), offered.end());
+                 break;
+             }
+@@ -109,2 +111,4 @@
+-            ASYNC_RELEASE
+-            brls::Logger::error("get live danmaku info: {}", error);
++            brls::sync([ASYNC_TOKEN, error]() {
++                ASYNC_RELEASE
++                brls::Logger::error("get live danmaku info: {}", error);
++            });
+@@ -166,2 +171 @@
+-    auto session = bilibili::HTTP::createSession();
+-    session->SetUrl(url);
++    auto session = bilibili::HTTP::createApiSession(url.str());

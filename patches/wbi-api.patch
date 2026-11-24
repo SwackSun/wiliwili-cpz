@@ -1,0 +1,10 @@
+--- wbi.cpp
++++ wbi.cpp
+@@ -74,6 +74,5 @@
+     }
+
+-    auto session = HTTP::createSession();
+-    session->SetUrl(cpr::Url{parseLink(Api::Nav)});
++    auto session = HTTP::createApiSession(parseLink(Api::Nav));
+     session->GetCallback([success, error, now](const cpr::Response& r) {
+         if (r.status_code != 200) {

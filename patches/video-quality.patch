@@ -1,0 +1,157 @@
+--- video_detail.cpp
++++ video_detail.cpp
+@@ -16,4 +16,7 @@
+ #include "bilibili/result/mine_collection_result.h"
+ #include "view/video_snapshot_core.hpp"
++#include "video-quality.hpp"
++#include "playback-display.hpp"
++#include "video-cdn.hpp"
+
+ /// 请求视频数据
+@@ -262,28 +265,59 @@
+ }
+
++void VideoDetail::refreshOutputQuality(bool season) {
++    if (!streamRequestId || requestedStreamQuality == cm0::outputVideoQuality(defaultQuality, cm0::usingLcd())) return;
++    if (season)
++        requestSeasonVideoUrl(episodeResult.bvid, episodeResult.cid, false, true);
++    else
++        requestVideoUrl(videoDetailResult.bvid, videoDetailPage.cid, false, true);
++}
++
+ /// 获取视频地址
+-void VideoDetail::requestVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo) {
++void VideoDetail::requestVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo, bool refreshStreamOnly) {
++    if (!cid) return;
++    const auto request = ++streamRequestId;
++    const int quality = cm0::outputVideoQuality(defaultQuality, cm0::usingLcd());
++    requestedStreamQuality = quality;
+     // 重置MPV
+-    MPVCore::instance().reset();
++    if (!refreshStreamOnly) {
++        loadedStreamCid = 0;
++        MPVCore::instance().reset();
++    }
+     ASYNC_RETAIN
+     brls::Logger::debug("请求视频播放地址: {}/{}/{}", bvid, cid, defaultQuality);
+-    if (cid == 0) return;
+
+     BILI::get_video_url(
+-        bvid, cid, defaultQuality,
+-        [ASYNC_TOKEN](const bilibili::VideoUrlResult& result) {
+-            brls::sync([ASYNC_TOKEN, result]() {
+-                ASYNC_RELEASE
++        bvid, cid, quality,
++        [ASYNC_TOKEN, request, cid, quality, refreshStreamOnly, landscape=landscapeQualityMax, portrait=portraitQualityMax, codec=BILI::VIDEO_CODEC](bilibili::VideoUrlResult result) {
++            cm0::prepareVideoStreams(result,landscape, portrait, codec, quality);
++            brls::sync([ASYNC_TOKEN, request, cid, refreshStreamOnly, result]() {
++                ASYNC_RELEASE
++                if (request != streamRequestId) return;
++                if (refreshStreamOnly && loadedStreamCid == cid && result.accept_quality.empty()) {
++                    requestedStreamQuality = 0;
++                    brls::Application::notify("当前画质暂不可用，继续播放原片源");
++                    return;
++                }
+                 this->videoUrlResult = result;
+-                this->onVideoPlayUrl(result);
+-            });
+-        },
+-        [ASYNC_TOKEN](BILI_ERR) {
+-            brls::Logger::error("{}", error);
+-            brls::sync([ASYNC_TOKEN, error]() {
+-                ASYNC_RELEASE
++                switchingDisplayStream = refreshStreamOnly && loadedStreamCid == cid;
++                loadedStreamCid = cid;
++                this->onVideoPlayUrl(this->videoUrlResult);
++                switchingDisplayStream = false;
++            });
++        },
++        [ASYNC_TOKEN, request, cid, refreshStreamOnly](BILI_ERR) {
++            brls::Logger::error("{}", error);
++            brls::sync([ASYNC_TOKEN, request, cid, refreshStreamOnly, error]() {
++                ASYNC_RELEASE
++                if (request != streamRequestId) return;
++                requestedStreamQuality = 0;
++                if (refreshStreamOnly && loadedStreamCid == cid) {
++                    brls::Application::notify("切换画质失败，继续播放原片源");
++                    return;
++                }
+                 this->onError("请求视频地址失败\n" + error);
+             });
+         });
++    if (refreshStreamOnly) return;
+     // 请求当前视频在线人数
+     this->requestVideoOnline(bvid, cid);
+@@ -299,28 +333,52 @@
+
+ /// 获取番剧地址
+-void VideoDetail::requestSeasonVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo) {
++void VideoDetail::requestSeasonVideoUrl(const std::string& bvid, uint64_t cid, bool requestHistoryInfo, bool refreshStreamOnly) {
++    if (!cid) return;
++    const auto request = ++streamRequestId;
++    const int quality = cm0::outputVideoQuality(defaultQuality, cm0::usingLcd());
++    requestedStreamQuality = quality;
+     // 重置MPV
+-    MPVCore::instance().reset();
++    if (!refreshStreamOnly) {
++        loadedStreamCid = 0;
++        MPVCore::instance().reset();
++    }
+
+     ASYNC_RETAIN
+     brls::Logger::debug("请求番剧视频播放地址: {}", cid);
+     BILI::get_season_url(
+-        cid, defaultQuality,
+-        [ASYNC_TOKEN](const bilibili::SeasonUrlResult& result) {
+-            brls::sync([ASYNC_TOKEN, result]() {
+-                ASYNC_RELEASE
++        cid, quality,
++        [ASYNC_TOKEN, request, cid, quality, refreshStreamOnly, landscape=landscapeQualityMax, portrait=portraitQualityMax, codec=BILI::VIDEO_CODEC](bilibili::SeasonUrlResult result) {
++            cm0::prepareVideoStreams(result.video_info,landscape, portrait, codec, quality);
++            brls::sync([ASYNC_TOKEN, request, cid, refreshStreamOnly, result]() {
++                ASYNC_RELEASE
++                if (request != streamRequestId) return;
+                 brls::Logger::debug("BILI::get_video_url");
++                if (refreshStreamOnly && loadedStreamCid == cid && result.video_info.accept_quality.empty()) {
++                    requestedStreamQuality = 0;
++                    brls::Application::notify("当前画质暂不可用，继续播放原片源");
++                    return;
++                }
+                 this->videoUrlResult = result.video_info;
++                switchingDisplayStream = refreshStreamOnly && loadedStreamCid == cid;
++                loadedStreamCid = cid;
+                 this->onVideoPlayUrl(this->videoUrlResult);
+-            });
+-        },
+-        [ASYNC_TOKEN](BILI_ERR) {
+-            brls::Logger::error("{}", error);
+-            brls::sync([ASYNC_TOKEN, error]() {
+-                ASYNC_RELEASE
++                switchingDisplayStream = false;
++            });
++        },
++        [ASYNC_TOKEN, request, cid, refreshStreamOnly](BILI_ERR) {
++            brls::Logger::error("{}", error);
++            brls::sync([ASYNC_TOKEN, request, cid, refreshStreamOnly, error]() {
++                ASYNC_RELEASE
++                if (request != streamRequestId) return;
++                requestedStreamQuality = 0;
++                if (refreshStreamOnly && loadedStreamCid == cid) {
++                    brls::Application::notify("切换画质失败，继续播放原片源");
++                    return;
++                }
+                 this->onError("请求视频地址失败\n" + error);
+             });
+         });
+
++    if (refreshStreamOnly) return;
+     // 请求当前视频在线人数
+     this->requestVideoOnline(bvid, cid);
+@@ -341,5 +399,6 @@
+     BILI::get_video_url_cast(
+         oid, cid, type, 120, ProgramConfig::instance().getCSRF(),
+-        [ASYNC_TOKEN](const bilibili::VideoUrlResult& result) {
++        [ASYNC_TOKEN, landscape=landscapeQualityMax, portrait=portraitQualityMax, codec=BILI::VIDEO_CODEC](bilibili::VideoUrlResult result) {
++            cm0::prepareVideoStreams(result, landscape, portrait, codec, cm0::maxVideoQuality);
+             brls::sync([ASYNC_TOKEN, result]() {
+                 ASYNC_RELEASE
