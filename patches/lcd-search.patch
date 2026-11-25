@@ -1,0 +1,39 @@
+--- search_activity.cpp
++++ search_activity.cpp
+@@ -8,2 +8,5 @@
+ #include "fragment/search_tab.hpp"
++#include "fragment/search_video.hpp"
++#include "playback-display.hpp"
++#include "lcd-search-input.hpp"
+ #include "fragment/search_hots.hpp"
+@@ -28,2 +31,6 @@
+     auto openText = [this]() {
++        if (cm0::compactLayout()) {
++            cm0::LcdSearchActivity::edit(SearchActivity::currentKey);
++            return;
++        }
+         brls::Application::getImeManager()->openForText([&](const std::string& text) { this->search(text); },
+@@ -44,2 +51,15 @@
+     this->searchBox->addGestureRecognizer(new brls::TapGestureRecognizer(this->searchBox, openText));
++
++    if (cm0::compactLayout()) {
++        searchBox->registerClickAction([openText](brls::View*) {
++            openText();
++            return true;
++        });
++        this->registerAction(ShortcutHelper::getRefresh(), [this](brls::View*) {
++            this->requestSearch(SearchActivity::currentKey);
++            return true;
++        });
++        this->requestSearch(SearchActivity::currentKey);
++        return;
++    }
+
+@@ -65,2 +85,7 @@
+     // 由此实现，重新搜索时只加载默认搜索页的结果，减少不必要的网络请求
++    if (cm0::compactLayout()) {
++        auto* results = static_cast<SearchVideo*>(getView("search/results"));
++        results->requestSearch(key);
++        return;
++    }
+     this->searchTab->focusNthTab(2);

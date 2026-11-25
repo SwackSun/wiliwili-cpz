@@ -7,12 +7,14 @@
 #include <mpv/cm0_frame.h>
 
 namespace cm0 {
+class DanmakuStrip;
 class NativeVideo {
   public:
     static std::unique_ptr<NativeVideo> open(int uiWidth, int uiHeight);
     ~NativeVideo();
     bool upload(const mpv_cm0_frame& frame, int targetWidth, int targetHeight);
     bool show(const std::vector<uint32_t>& ui, int width, int height);
+    DanmakuStrip* requestDanmaku();
     void hide();
     void composeScreenshot(std::vector<uint32_t>& ui, int width, int height) const;
     // Visible video rectangle in normalized SW target coordinates, including mpv zoom/pan.

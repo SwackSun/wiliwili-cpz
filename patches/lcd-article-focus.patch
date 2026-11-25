@@ -1,0 +1,18 @@
+--- dynamic_article.cpp
++++ dynamic_article.cpp
+@@ -418,3 +418,8 @@
+     });
+-    brls::Application::giveFocus(this->buttonClose);
++    if (this->buttonClose->getVisibility() == brls::Visibility::VISIBLE)
++        brls::Application::giveFocus(this->buttonClose);
++    else {
++        this->setFocusable(true);
++        brls::Application::giveFocus(this);
++    }
+ }
+@@ -438,3 +443,4 @@
+     this->buttonClose->setFocusable(false);
+-    if (brls::Application::getCurrentFocus() == this->buttonClose)
++    setFocusable(false);
++    if (brls::Application::getCurrentFocus() == this || brls::Application::getCurrentFocus() == this->buttonClose)
+         brls::Application::giveFocus(this->recyclingGrid);

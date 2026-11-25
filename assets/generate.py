@@ -11,6 +11,8 @@ import struct
 import tempfile
 import zlib
 
+import lcd_layouts
+
 
 INK = (42, 62, 79, 255)
 TEAL = (43, 154, 145, 255)
@@ -126,9 +128,9 @@ def coin_strip(width, height, count):
             x = frame_width // 2 + (2 * coin - count + 1) * radius // 2
             y = height // 2 + bounce - coin * radius
             image.circle(x, y, radius, INK)
-            image.circle(x, y, radius - 3, GOLD)
-            image.circle(x, y, radius - 9, INK)
-            image.circle(x, y, radius - 12, GOLD)
+            image.circle(x, y, radius * 9 // 10, GOLD)
+            image.circle(x, y, radius * 7 // 10, INK)
+            image.circle(x, y, radius * 6 // 10, GOLD)
             stroke = max(2, radius // 12)
             image.rect(x - stroke, y - radius // 3, 2 * stroke, 2 * radius // 3, INK)
         strip.paste_frame(image, frame * frame_width)
@@ -136,32 +138,61 @@ def coin_strip(width, height, count):
 
 
 RASTER = {
-    'icon/icon.png': (256, 256, 'play'),
+    'icon/icon.png': (96, 96, 'play'),
     'icon/logo.png': (160, 40, 'play'),
-    'icon/bilibili_video.png': (256, 189, 'play'),
-    'pictures/22_close.png': (233, 210, 'keyboard'),
-    'pictures/22_open.png': (232, 210, 'portrait'),
-    'pictures/33_close.png': (216, 212, 'keyboard'),
-    'pictures/33_open.png': (216, 212, 'portrait'),
-    'pictures/danmaku_highlight.png': (360, 120, 'notice'),
-    'pictures/danmaku_ohh.png': (360, 120, 'notice'),
-    'pictures/default_avatar.png': (157, 155, 'avatar'),
-    'pictures/empty.png': (560, 316, 'card'),
-    'pictures/hint_game_1.png': (1566, 689, 'keyboard'),
-    'pictures/hint_game_2.png': (1556, 668, 'keyboard'),
-    'pictures/hint_hbmenu.png': (1548, 659, 'keyboard'),
-    'pictures/hint_wiliwili.png': (1548, 659, 'keyboard'),
+    'icon/bilibili_video.png': (128, 95, 'play'),
+    'pictures/22_close.png': (112, 101, 'keyboard'),
+    'pictures/22_open.png': (112, 101, 'portrait'),
+    'pictures/33_close.png': (108, 106, 'keyboard'),
+    'pictures/33_open.png': (108, 106, 'portrait'),
+    'pictures/danmaku_highlight.png': (144, 48, 'notice'),
+    'pictures/danmaku_ohh.png': (144, 48, 'notice'),
+    'pictures/default_avatar.png': (64, 63, 'avatar'),
+    'pictures/empty.png': (240, 135, 'card'),
+    'pictures/hint_game_1.png': (480, 211, 'keyboard'),
+    'pictures/hint_game_2.png': (480, 206, 'keyboard'),
+    'pictures/hint_hbmenu.png': (480, 204, 'keyboard'),
+    'pictures/hint_wiliwili.png': (480, 204, 'keyboard'),
     'pictures/icon-eye-16_16.png': (16, 16, 'eye'),
     'pictures/icon-eye.png': (42, 42, 'eye'),
     'pictures/icon-history.png': (32, 32, 'history'),
     'pictures/icon-quotation.png': (32, 32, 'quotation'),
-    'pictures/net_error.png': (560, 316, 'warning'),
+    'pictures/net_error.png': (240, 135, 'warning'),
     'pictures/playlistbg.png': (190, 120, 'card'),
-    'pictures/room-block.png': (800, 414, 'warning'),
-    'pictures/sorry.png': (420, 224, 'warning'),
-    'pictures/video-card-bg.png': (568, 354, 'card'),
+    'pictures/room-block.png': (320, 166, 'warning'),
+    'pictures/sorry.png': (224, 119, 'warning'),
+    'pictures/video-card-bg.png': (224, 140, 'card'),
     'img/sys/cursor.png': (36, 56, 'cursor'),
 }
+
+
+COIN_STRIPS = (('', 1536, 103), ('-small', 1152, 77))
+
+
+def copy_compact_art(upstream, target):
+    from PIL import Image
+
+    shutil.copytree(upstream / 'svg', target / 'svg')
+    limits = {name: (w, h) for name, (w, h, _) in RASTER.items()}
+    for mascot in ('22', '33'):
+        for suffix, width, height in COIN_STRIPS:
+            limits[f'pictures/{mascot}-coin-ani{suffix}.png'] = (width, height)
+    for dirname in ('icon', 'img', 'pictures'):
+        for source in (upstream / dirname).rglob('*.png'):
+            relative = source.relative_to(upstream)
+            if 'backup' in relative.parts:
+                continue
+            dest = target / relative
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with Image.open(source) as original:
+                image = original.convert('RGBA')
+                size = limits.get(relative.as_posix(), (44, 44))
+                if '-coin-ani' in source.name:
+                    # The XML addresses 24 frames by equal fractions of the strip.
+                    image = image.resize(size, Image.Resampling.LANCZOS)
+                else:
+                    image.thumbnail(size, Image.Resampling.LANCZOS)
+                image.save(dest)
 
 
 def icon_color(name):
@@ -172,10 +203,36 @@ def icon_color(name):
     return '#5b7085'
 
 
-def generate(upstream, target, art):
+def generate(upstream, target, art, upstream_art=False):
     for dirname in ('font', 'i18n', 'material', 'opencc', 'xml'):
         shutil.copytree(upstream / dirname, target / dirname, ignore=shutil.ignore_patterns(
             'keymap_ps.ttf', 'keymap_xbox.ttf', 'FREEWARE.txt', '.gitignore'))
+    for layout, name in (('lcd-main.xml', 'activity/main.xml'), ('lcd-home.xml', 'fragment/home_tab.xml'),
+                         ('lcd-search.xml', 'activity/search_activity.xml'),
+                         ('lcd-tv-search.xml', 'activity/search_activity_tv.xml'),
+                         ('lcd-qr.xml', 'fragment/mine_qr_login.xml'),
+                         ('lcd-recommends.xml', 'fragment/home_recommends.xml')):
+        dest = target / 'lcd/xml' / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(art / layout, dest)
+    lcd_layouts.generate(upstream / 'xml', target / 'lcd/xml')
+    lcd_layouts.fit_text(upstream / 'xml', target / 'lcd/xml', lcd=True)
+    lcd_layouts.fit_text(upstream / 'xml', target / 'hdmi/xml', lcd=False)
+    dynamic_feed = 'xml/fragment/dynamic_tab.xml'
+    shutil.copyfile(target / 'hdmi' / dynamic_feed, target / dynamic_feed)
+    # This particular font predates Adobe's switch to the OFL in version 1.002.
+    (target / 'font' / 'SOURCE-HAN-NOTICE.txt').write_text(
+        'switch_font.ttf is Source Han Sans CN Regular, version 1.000.\n'
+        'Copyright 2014 Adobe Systems Incorporated. Licensed under the Apache License, Version 2.0.\n'
+        'See ../material/LICENSE.txt for the full license text.\n', encoding='utf-8')
+    if upstream_art:
+        copy_compact_art(upstream, target)
+        (target / 'NOTICE.md').write_text(
+            'Original artwork from the pinned xfangfang/wiliwili resources directory.\n'
+            'Source: https://github.com/xfangfang/wiliwili/tree/v1.6.0/resources\n'
+            'Third-party artwork retains its original ownership.\n', encoding='utf-8')
+        shutil.copyfile(art / 'NOTO-EMOJI-OFL', target / 'NOTO-EMOJI-OFL')
+        return
     assets = json.loads((art / 'icons.json').read_text(encoding='utf-8'))
     (target / 'svg').mkdir()
     for name, icon in assets['aliases'].items():
@@ -184,20 +241,21 @@ def generate(upstream, target, art):
     for name, specification in RASTER.items():
         raster(*specification).write(target / name)
     for mascot, count in (('22', 1), ('33', 2)):
-        for suffix, width, height in (('', 4488, 300), ('-small', 3366, 225)):
+        for suffix, width, height in COIN_STRIPS:
             coin_strip(width, height, count).write(target / f'pictures/{mascot}-coin-ani{suffix}.png')
     for theme in ('light', 'dark'):
         for strength in range(4):
-            raster(176, 176, f'wifi-{strength}', theme == 'light').write(
+            raster(44, 44, f'wifi-{strength}', theme == 'light').write(
                 target / f'img/sys/wifi_{strength}_{theme}.png')
         raster(44, 44, 'battery', theme == 'light').write(target / f'img/sys/battery_back_{theme}.png')
-        raster(176, 176, 'ethernet', theme == 'light').write(target / f'img/sys/ethernet_{theme}.png')
+        raster(44, 44, 'ethernet', theme == 'light').write(target / f'img/sys/ethernet_{theme}.png')
     for notice in ('LUCIDE-LICENSE', 'FEATHER-LICENSE', 'NOTO-EMOJI-OFL', 'NOTICE.md'):
         shutil.copyfile(art / notice, target / notice)
 
 
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument('--upstream-art', action='store_true')
     cli.add_argument('upstream', type=Path)
     cli.add_argument('output', type=Path)
     args = cli.parse_args()
@@ -205,7 +263,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=args.output.parent) as work:
         target = Path(work) / 'resources'
         target.mkdir()
-        generate(args.upstream, target, Path(__file__).resolve().parent)
+        generate(args.upstream, target, Path(__file__).resolve().parent, args.upstream_art)
         if args.output.is_dir() and not args.output.is_symlink():
             shutil.rmtree(args.output)
         target.rename(args.output)

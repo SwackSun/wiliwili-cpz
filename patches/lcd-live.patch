@@ -1,0 +1,31 @@
+--- home_live.cpp
++++ home_live.cpp
+@@ -9,4 +9,5 @@
+
+ #include "fragment/home_live.hpp"
++#include "playback-display.hpp"
+ #include "view/recycling_grid.hpp"
+ #include "view/video_card.hpp"
+@@ -330,7 +331,8 @@
+         this->recyclingGrid->showSkeleton();
+         this->requestData(-1, -1, 1);
+-        this->requestAreaList();
++        if (!cm0::compactLayout()) this->requestAreaList();
+     });
+     this->requestData();
++    if (cm0::compactLayout()) return;
+     this->requestAreaList();
+     live_label->setText("推荐 - 全部推荐");
+@@ -356,4 +358,12 @@
+
+ void HomeLive::onCreate() {
++    if (cm0::compactLayout()) {
++        this->registerTabAction("wiliwili/home/common/refresh"_i18n, brls::ControllerButton::BUTTON_X,
++                                ShortcutHelper::getRefresh(), [this](brls::View*) {
++                                    recyclingGrid->refresh();
++                                    return true;
++                                });
++        return;
++    }
+     this->live_box->addGestureRecognizer(new brls::TapGestureRecognizer(this->live_box, [this]() {
+         this->switchChannel();

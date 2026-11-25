@@ -1,4 +1,4 @@
-# wiliwili for CardputerZero
+# wiliwili-cpz for CardputerZero
 
 Community port of [xfangfang's wiliwili](https://github.com/xfangfang/wiliwili) v1.6.0 for M5Stack CardputerZero running czlite. The port adds LCD and HDMI display handling, a VideoCore IV playback path, and CardputerZero keyboard shortcuts. Port changes date from 2026-11-18. See the [device guide](USAGE.md) for controls.
 

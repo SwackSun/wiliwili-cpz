@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <cmath>
 #include "native-video.hpp"
+#include "danmaku-strip.hpp"
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
@@ -38,8 +39,9 @@ struct Buffer {
     bool configure(uint32_t w, uint32_t h) {
         if (id && width == w && height == h)
             return true;
-        const bool rgb = format == DRM_FORMAT_ARGB8888;
-        pitch[0] = rgb ? (w * 4 + 63) & ~63u : (w + 63) & ~63u;
+        const bool rgb = format != DRM_FORMAT_NV12;
+        const unsigned bytes = format == DRM_FORMAT_ARGB4444 ? 2 : (rgb ? 4 : 1);
+        pitch[0] = (w * bytes + 63) & ~63u;
         pitch[1] = rgb ? 0 : pitch[0];
         offset[1] = rgb ? 0 : pitch[0] * h;
         if (uint64_t(pitch[0]) * h + uint64_t(pitch[1]) * (h / 2) > size)
@@ -56,13 +58,13 @@ struct Buffer {
         return true;
     }
     bool allocate() {
-        const bool rgb = format == DRM_FORMAT_ARGB8888;
+        const bool rgb = format != DRM_FORMAT_NV12;
         drm_mode_create_dumb create{};
         // Reserve scanout memory before Mesa loads UI textures. Leave enough
         // room for the aligned chroma rows of a portrait 720x1280 stream.
         create.width = rgb ? width : 1280;
         create.height = rgb ? height : 1152;
-        create.bpp = rgb ? 32 : 8;
+        create.bpp = format == DRM_FORMAT_ARGB4444 ? 16 : (rgb ? 32 : 8);
         if (drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create))
             return false;
         handle = create.handle;
@@ -112,6 +114,9 @@ struct Plane {
                set(req, "CRTC_Y", dst[1]) && set(req, "CRTC_W", dst[2] - dst[0]) &&
                set(req, "CRTC_H", dst[3] - dst[1]);
     }
+    bool disable(drmModeAtomicReq* req) const {
+        return set(req, "FB_ID", 0) && set(req, "CRTC_ID", 0);
+    }
 };
 struct Pair {
     std::unique_ptr<Buffer> buffers[2];
@@ -143,8 +148,10 @@ struct Pair {
 struct NativeVideo::State {
     int fd = -1, width = 0, height = 0;
     uint32_t crtc = 0;
-    Plane video, ui;
-    Pair images, overlays;
+    Plane video, ui, danmaku;
+    Pair images, overlays, strips;
+    std::unique_ptr<DanmakuStrip> comments;
+    bool commentsRequested = false, commentsVisible = false;
     std::array<int, 4> src{}, dst{};
     bool bt709 = false, fullRange = false, visible = false;
     std::vector<uint32_t> previous;
@@ -224,8 +231,13 @@ struct NativeVideo::State {
             if (!video.id && p.z > primaryZ && p.supports(DRM_FORMAT_NV12))
                 video = p;
             else if (video.id && p.z > video.z && p.supports(DRM_FORMAT_ARGB8888)) {
-                ui = p;
-                break;
+                if (!ui.id) {
+                    ui = p;
+                } else if (p.z > ui.z && ui.supports(DRM_FORMAT_ARGB4444)) {
+                    danmaku = ui;
+                    ui = p;
+                    break;
+                }
             }
         }
         return ui.id && images.reserve(fd, 1280, 720, DRM_FORMAT_NV12) &&
@@ -234,6 +246,7 @@ struct NativeVideo::State {
     ~State() {
         images = {};
         overlays = {};
+        strips = {};
         if (fd >= 0)
             close(fd);
     }
@@ -248,26 +261,50 @@ std::unique_ptr<NativeVideo> NativeVideo::open(int uiWidth, int uiHeight) {
     return {};
 }
 NativeVideo::~NativeVideo() { hide(); }
+DanmakuStrip* NativeVideo::requestDanmaku() {
+    auto& s = *state;
+    s.commentsRequested = s.danmaku.id && !s.comments;
+    return s.comments.get();
+}
+
 void NativeVideo::hide() {
     auto& s = *state;
     if (!s.visible)
         return;
     auto* req = drmModeAtomicAlloc();
     if (req) {
-        for (const auto* p : {&s.video, &s.ui}) {
-            p->set(req, "FB_ID", 0);
-            p->set(req, "CRTC_ID", 0);
-        }
+        s.video.disable(req);
+        s.ui.disable(req);
+        if (s.commentsVisible) s.danmaku.disable(req);
         drmModeAtomicCommit(s.fd, req, 0, nullptr);
         drmModeAtomicFree(req);
     }
     s.visible = false;
+    s.commentsVisible = s.commentsRequested = false;
+    s.comments.reset();
+    s.strips = {};
 }
 // Blend the displayed NV12 plane under the premultiplied ARGB UI only for PrintScreen.
 void NativeVideo::composeScreenshot(std::vector<uint32_t>& ui, int w, int h) const {
     auto& s = *state;
     auto* b = s.images.buffers[s.images.displayed].get();
     if (!s.visible || !b || !b->data) return;
+    if (s.commentsVisible) {
+        const auto& strip = *s.strips.buffers[s.strips.displayed];
+        for (int y = 0; y < h && y * 720 / h < int(strip.height); ++y) {
+            const auto* line = reinterpret_cast<const uint16_t*>(strip.data + (y * 720 / h) * strip.pitch[0]);
+            for (int x = 0; x < w; ++x) {
+                const uint32_t comment = line[x * strip.width / w];
+                if (!comment) continue;
+                auto& pixel = ui[y * w + x];
+                const unsigned clear = 255 - (pixel >> 24);
+                pixel += (((((comment >> 12) & 15) * 17 * clear / 255) << 24) |
+                          ((((comment >> 8) & 15) * 17 * clear / 255) << 16) |
+                          ((((comment >> 4) & 15) * 17 * clear / 255) << 8) |
+                          ((comment & 15) * 17 * clear / 255));
+            }
+        }
+    }
     int x0 = std::lround(viewport[0]*w), y0 = std::lround(viewport[1]*h);
     int x1 = std::lround(viewport[2]*w), y1 = std::lround(viewport[3]*h);
     for (int y = std::max(0,y0); y < std::min(h,y1); ++y) {
@@ -342,7 +379,9 @@ bool NativeVideo::show(const std::vector<uint32_t>& pixels, int w, int h) {
         overlay->copy(0, reinterpret_cast<const uint8_t*>(pixels.data()), w * 4, w * 4, h);
         s.previous = pixels;
     }
-    if (!s.images.pending && !s.overlays.pending && s.visible)
+    const bool drawComments = s.comments && s.comments->active();
+    if (!s.images.pending && !s.overlays.pending && s.visible && !drawComments &&
+        !s.commentsVisible && !s.commentsRequested)
         return true;
     auto* req = drmModeAtomicAlloc();
     if (!req)
@@ -356,9 +395,52 @@ bool NativeVideo::show(const std::vector<uint32_t>& pixels, int w, int h) {
         if (it != s.video.enums.end())
             ok = ok && s.video.set(req, prop, it->second);
     }
-    ok = ok && drmModeAtomicCommit(s.fd, req, 0, nullptr) == 0;
+    const std::array<int, 4> stripSrc{0, 0, DanmakuStrip::width, DanmakuStrip::height};
+    const std::array<int, 4> stripDst{0, 0, s.width, s.height * DanmakuStrip::height / 720};
+    if (ok && s.commentsRequested && !s.comments) {
+        s.comments = std::make_unique<DanmakuStrip>();
+        bool supported = s.comments->ready() &&
+            s.strips.reserve(s.fd, DanmakuStrip::width, DanmakuStrip::height, DRM_FORMAT_ARGB4444);
+        if (supported) {
+            auto* test = drmModeAtomicDuplicate(req);
+            supported = test && s.danmaku.region(test, s.crtc, s.strips.current()->id, stripSrc, stripDst) &&
+                drmModeAtomicCommit(s.fd, test, DRM_MODE_ATOMIC_TEST_ONLY, nullptr) == 0;
+            if (test) drmModeAtomicFree(test);
+        }
+        if (!supported) {
+            s.comments.reset();
+            s.strips = {};
+            s.danmaku.id = 0;
+        }
+        std::cerr << "HDMI danmaku strip " << (supported ? "1280x192 ARGB4444" : "unavailable") << '\n';
+    }
+    s.commentsRequested = false;
+    const bool baseReady = ok;
+    const int baseProperties = drmModeAtomicGetCursor(req);
+    if (ok && drawComments) {
+        auto* strip = s.strips.next(DanmakuStrip::width, DanmakuStrip::height);
+        ok = strip && s.danmaku.region(req, s.crtc, strip->id, stripSrc, stripDst);
+        if (ok) s.comments->copyTo(1 - s.strips.displayed, strip->data, strip->pitch[0]);
+        s.comments->clear();
+    } else if (ok && s.commentsVisible) {
+        ok = s.danmaku.disable(req);
+    }
+    // A blocking atomic commit completes the flip before the back page is reused.
+    bool committed = ok && drmModeAtomicCommit(s.fd, req, 0, nullptr) == 0;
+    bool stripDisplayed = drawComments;
+    if (!committed && baseReady && drawComments) {
+        drmModeAtomicSetCursor(req, baseProperties);
+        committed = (!s.commentsVisible || s.danmaku.disable(req)) &&
+            drmModeAtomicCommit(s.fd, req, 0, nullptr) == 0;
+        if (committed) {
+            s.comments.reset();
+            s.strips = {};
+            s.danmaku.id = 0;
+            stripDisplayed = false;
+        }
+    }
     drmModeAtomicFree(req);
-    if (!ok) {
+    if (!committed) {
         std::cerr << "HDMI plane commit failed: " << strerror(errno) << '\n';
         return false;
     }
@@ -366,8 +448,10 @@ bool NativeVideo::show(const std::vector<uint32_t>& pixels, int w, int h) {
         std::cerr << "HDMI video plane " << b->width << 'x' << b->height << " on " << s.width << 'x' << s.height
                   << '\n';
     s.visible = true;
+    s.commentsVisible = stripDisplayed;
     s.images.finish();
     s.overlays.finish();
+    s.strips.finish();
     return true;
 }
 } // namespace cm0

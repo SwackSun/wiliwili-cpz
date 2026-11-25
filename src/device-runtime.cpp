@@ -97,7 +97,7 @@ public:
         if (!tty_ || ioctl(tty_.get(), VT_GETSTATE, &state) || ioctl(tty_.get(), VT_GETMODE, &mode) ||
             ioctl(tty_.get(), KDGETMODE, &displayMode) || ioctl(tty_.get(), KDGKBMODE, &keyboardMode_) ||
             state.v_active != 1 || mode.mode != VT_AUTO || displayMode != KD_TEXT)
-            throw std::runtime_error("tty1 must be active in text mode before starting wiliwili");
+            throw std::runtime_error("tty1 must be active in text mode before starting wiliwili-cpz");
         if (ioctl(tty_.get(), KDSETMODE, KD_GRAPHICS))
             throw std::runtime_error("Cannot enter graphics mode");
         active_ = true;
@@ -113,6 +113,7 @@ public:
     void restore() {
         if (!active_) return;
         active_ = false;
+        setKeypadFnLock(false);
         tcflush(tty_.get(), TCIFLUSH);
         if (ioctl(tty_.get(), KDSKBMODE, keyboardMode_)) perror("restore keyboard");
         if (ioctl(tty_.get(), KDSETMODE, KD_TEXT)) perror("restore text mode");
@@ -202,7 +203,7 @@ public:
     void draw(const std::vector<std::uint32_t>& pixels, int width, int height) {
         if (width < 1 || width > 4096 || height < 1 || height > 2160 ||
             pixels.size() != static_cast<std::size_t>(width) * height)
-            throw std::runtime_error("Invalid wiliwili frame size");
+            throw std::runtime_error("Invalid wiliwili-cpz frame size");
         if (width != sourceWidth_ || height != sourceHeight_) configureViewport(width, height);
         if (mode_.bits_per_pixel == 16) drawRows(pixels, row16_);
         else drawRows(pixels, row32_);
@@ -272,7 +273,7 @@ private:
         for (int y = 0; y < scaledHeight; ++y) rows_[y] = y * height / scaledHeight;
         for (unsigned y = 0; y < mode_.yres; ++y)
             std::memset(rowAddress(y), 0, mode_.xres * bytesPerPixel());
-        previous_.clear();
+        std::vector<std::uint32_t>().swap(previous_);
     }
 
     template<class Pixel>
@@ -323,6 +324,18 @@ using KeyBits = std::array<unsigned char, (KEY_CNT + 7) / 8>;
 bool bit(const KeyBits& keys, unsigned code) {
     return (keys[code / 8] & (1u << (code % 8))) != 0;
 }
+}
+
+void setKeypadFnLock(bool lock) {
+    static const fs::path attribute = [] {
+        std::error_code error;
+        for (const auto& entry : fs::directory_iterator("/sys/bus/i2c/drivers/tca8418_keypad", error)) {
+            const auto path = entry.path() / "fn_lock";
+            if (fs::exists(path, error)) return path;
+        }
+        return fs::path{};
+    }();
+    if (!attribute.empty()) std::ofstream(attribute) << (lock ? "1\n" : "0\n");
 }
 
 struct Display::State {
@@ -464,19 +477,15 @@ std::vector<KeyEvent> Keyboard::poll() {
     return events;
 }
 
-int supervise(const std::function<int()>& client) {
-    stopRequested = 0;
-    Console console;
-    Backlight backlight;
-    for (int signal : {SIGINT, SIGTERM, SIGHUP}) std::signal(signal, requestStop);
+static int runChild(const std::function<int()>& client, Console& console, Backlight& backlight) {
     const auto supervisor = getpid();
     const auto pid = fork();
-    if (pid < 0) throw std::runtime_error("Cannot start wiliwili");
+    if (pid < 0) throw std::runtime_error("Cannot start wiliwili-cpz");
     if (pid == 0) {
         int status = 1;
         if (prctl(PR_SET_PDEATHSIG, SIGTERM) == 0 && getppid() == supervisor) {
             try { status = client(); }
-            catch (const std::exception& error) { std::cerr << "wiliwili: " << error.what() << '\n'; }
+            catch (const std::exception& error) { std::cerr << "wiliwili-cpz: " << error.what() << '\n'; }
         }
         if (getppid() != supervisor) {
             backlight.restore();
@@ -510,10 +519,23 @@ int supervise(const std::function<int()>& client) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     removeClientPid();
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+}
+
+int supervise(const std::function<int()>& client) {
+    stopRequested = 0;
+    Console console;
+    Backlight backlight;
+    for (int signal : {SIGINT, SIGTERM, SIGHUP}) std::signal(signal, requestStop);
+    setKeypadFnLock(true);
+    int status;
+    do {
+        status = runChild(client, console, backlight);
+    } while (status == 75 && !stopping());
     backlight.restore();
     console.restore();
     std::cerr << "console: text restored, child status=" << status << '\n';
-    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+    return status;
 }
 
 bool stopping() { return stopRequested != 0; }

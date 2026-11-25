@@ -1,0 +1,17 @@
+--- player_single_comment.cpp
++++ player_single_comment.cpp
+@@ -275,5 +275,13 @@
+     auto refreshFunc = [this](brls::View* view) {
+-        brls::Application::giveFocus(this->closeBtn);
++        const bool compact = closeBtn->getVisibility() == brls::Visibility::GONE;
++        if (compact) {
++            backgroundBox->setFocusable(true);
++            brls::Application::giveFocus(backgroundBox);
++        } else brls::Application::giveFocus(closeBtn);
+         this->recyclingGrid->forceRequestNextPage();
+         this->setCommentData(this->root, NAN, this->commentType);
++        if (compact) {
++            backgroundBox->setFocusable(false);
++            brls::Application::giveFocus(recyclingGrid);
++        }
+         return true;

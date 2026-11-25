@@ -1,0 +1,19 @@
+<brls:Box
+        axis="column"
+        alignItems="center"
+        justifyContent="center"
+        backgroundColor="#FFFFFF"
+        focusable="true"
+        hideHighlight="true">
+    <QRImage
+            id="mine/qr"
+            width="289"
+            height="289"
+            visibility="gone"/>
+    <brls:Label
+            id="mine/hint"
+            fontSize="22"
+            textColor="#18191C"
+            horizontalAlign="center"
+            text="@i18n/wiliwili/mine/login/loading"/>
+</brls:Box>

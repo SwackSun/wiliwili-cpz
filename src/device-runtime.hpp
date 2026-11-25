@@ -39,6 +39,7 @@ private:
 
 int supervise(const std::function<int()>& client);
 bool stopping();
+void setKeypadFnLock(bool lock);
 bool hdmiAudioAvailable();
 bool systemHotkey(unsigned code, bool localDisplay, std::string* feedback);
 std::string saveScreenshot(const std::vector<std::uint32_t>& pixels, int width, int height);

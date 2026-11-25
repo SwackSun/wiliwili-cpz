@@ -1,0 +1,19 @@
+<brls:AppletFrame headerHidden="true" footerHidden="true">
+    <brls:Box axis="column" grow="1" padding="8">
+        <brls:Box id="search/field" focusable="true" height="38" alignItems="center"
+                  paddingLeft="8" paddingRight="8" backgroundColor="@theme/color/grey_1" cornerRadius="4">
+            <SVGImage id="search/icon" width="20" height="20"/>
+            <brls:Label id="search/input" grow="1" marginLeft="8" fontSize="20" singleLine="true"/>
+        </brls:Box>
+        <brls:Box grow="1" marginTop="5">
+            <brls:Box axis="column" width="50%" paddingRight="4">
+                <brls:Label fontSize="18" text="@i18n/wiliwili/search/tv/hots"/>
+                <SearchHots id="search/hots" grow="1" spanCount="1"/>
+            </brls:Box>
+            <brls:Box axis="column" width="50%" paddingLeft="4">
+                <brls:Label fontSize="18" text="@i18n/wiliwili/search/tv/history"/>
+                <SearchHistory id="search/history" grow="1" spanCount="1"/>
+            </brls:Box>
+        </brls:Box>
+    </brls:Box>
+</brls:AppletFrame>

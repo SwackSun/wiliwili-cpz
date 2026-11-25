@@ -1,0 +1,51 @@
+--- recycling_grid.cpp
++++ recycling_grid.cpp
+@@ -5,2 +5,3 @@
+ #include <utility>
++#include "playback-display.hpp"
+ #include "view/recycling_grid.hpp"
+@@ -78,3 +79,7 @@
+     this->hintLabel->detach();
+-    this->hintLabel->setFontSize(14);
++    if (cm0::compactLayout()) {
++        this->hintImage->setSize({180, 100});
++        this->hintLabel->setSingleLine(true);
++    }
++    this->hintLabel->setFontSize(cm0::compactLayout() ? 20 : 14);
+     this->hintLabel->setHorizontalAlign(brls::HorizontalAlign::CENTER);
+@@ -170,2 +175,16 @@
+         float h1 = hintImage->getHeight(), h2 = hintLabel->getHeight();
++        if (cm0::compactLayout()) {
++            nvgSave(vg);
++            nvgIntersectScissor(vg, x, y, width, height);
++            const bool showImage = height >= 130 && width >= 280;
++            const float top = y + (height - h2 - (showImage ? h1 : 0.f)) / 2;
++            if (showImage) {
++                hintImage->setAlpha(getAlpha());
++                hintImage->draw(vg, x + (width - w1) / 2, top, w1, h1, style, ctx);
++            }
++            hintLabel->setAlpha(getAlpha());
++            hintLabel->draw(vg, x + (width - w2) / 2, top + (showImage ? h1 : 0.f), w2, h2, style, ctx);
++            nvgRestore(vg);
++            return;
++        }
+         this->hintImage->setAlpha(this->getAlpha());
+@@ -399,3 +418,8 @@
+     this->hintImage->setImageFromRes("pictures/net_error.png");
+-    this->hintLabel->setText(error);
++    // Transport diagnostics can span several screens. Keep the concise translated reason on LCD.
++    const bool transportError = error.find("Failed to connect") != std::string::npos ||
++                                error.find("Could not resolve") != std::string::npos ||
++                                error.find("Timeout was reached") != std::string::npos;
++    using namespace brls::literals;
++    this->hintLabel->setText(cm0::compactLayout() && transportError ? "wiliwili/mine/login/network_error"_i18n : error);
+     this->clearData();
+@@ -521,2 +545,4 @@
+     this->refreshAction = event;
++    if (cm0::compactLayout())
++        return;
+     this->refreshButton->setVisibility(brls::Visibility::VISIBLE);
+@@ -647,2 +673,3 @@
+     if (!this->contentBox) return;
++    if (cm0::compactLayout() && hintLabel && width > 8) hintLabel->setWidth(width - 8);
+     this->contentBox->setWidth(width);

@@ -1,12 +1,82 @@
 --- mine_tab.cpp
 +++ mine_tab.cpp
-@@ -8,4 +8,5 @@
-
+@@ -7,6 +7,8 @@
+ #include <borealis/views/dialog.hpp>
+ 
  #include "fragment/mine_tab.hpp"
 +#include "account-logout.hpp"
++#include "playback-display.hpp"
  #include "fragment/mine_qr_login.hpp"
  #include "utils/image_helper.hpp"
-@@ -149,7 +150,5 @@
+ #include "utils/config_helper.hpp"
+@@ -37,41 +39,30 @@
+             } catch (...) {
+             }
+             try {
+-                this->mineCollection->requestData(true);
++                this->mineLater->requestData();
+             } catch (...) {
+             }
+-            try {
+-                this->mineSubscription->requestData(true);
+-            } catch (...) {
++            auto* main = dynamic_cast<AutoTabFrame*>(getParent());
++            if (main) {
++                auto* feed = dynamic_cast<DynamicTab*>(main->getTab(1)->getAttachedView());
++                if (feed) feed->refreshAfterLogin();
+             }
++            if (cm0::compactLayout()) return;
+             try {
+-                this->mineAnime->requestData(true);
++                this->mineCollection->requestData(true);
+             } catch (...) {
+             }
+             try {
+-                this->mineSeries->requestData(true);
++                this->mineSubscription->requestData(true);
+             } catch (...) {
+             }
+             try {
+-                this->mineLater->requestData();
++                this->mineAnime->requestData(true);
+             } catch (...) {
+             }
+             try {
+-                //动态页刷新
+-                auto mainTab = dynamic_cast<AutoTabFrame*>(this->getParent());
+-                auto* tab    = (DynamicTab*)mainTab->getTab(1)->getAttachedView();
+-                if (!tab) {
+-                    brls::sync([mainTab]() {
+-                        auto tab = dynamic_cast<DynamicTab*>(mainTab->getTab(1)->createAttachedView());
+-                        tab->requestUpList();
+-                        tab->requestDynamicVideoList(1, "");
+-                    });
+-                } else {
+-                    tab->requestUpList();
+-                    tab->requestDynamicVideoList(1, "");
+-                }
++                this->mineSeries->requestData(true);
+             } catch (...) {
+-                brls::Logger::error("error: cannot refresh activity page");
+             }
+         }
+     });
+@@ -120,7 +111,12 @@
+     boxGotoUserSpace->registerAction(
+         "hints/ok"_i18n, BUTTON_A,
+         [this](View*) -> bool {
+-            auto dialog = new brls::Dialog(MineQrLogin::create(this->loginCb));
++            auto* login = MineQrLogin::create(this->loginCb);
++            if (cm0::compactLayout()) {
++                brls::Application::pushActivity(new brls::Activity(login), brls::TransitionAnimation::NONE);
++                return true;
++            }
++            auto dialog = new brls::Dialog(login);
+             dialog->addButton("hints/cancel"_i18n, []() {
+             });
+             dialog->open();
+@@ -148,9 +144,7 @@
+             dialog->addButton("hints/back"_i18n, []() {
              });
              dialog->addButton("hints/ok"_i18n, []() {
 -                ProgramConfig::instance().setCookie({});
@@ -15,3 +85,4 @@
 +                cm0::logout();
              });
              dialog->open();
+             return true;

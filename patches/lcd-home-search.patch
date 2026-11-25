@@ -1,0 +1,33 @@
+--- home_tab.cpp
++++ home_tab.cpp
+@@ -8,2 +8,3 @@
+ #include "fragment/home_tab.hpp"
++#include "playback-display.hpp"
+ #include "view/custom_button.hpp"
+@@ -23,3 +24,3 @@
+                             [](brls::View* view) -> bool {
+-                                if (TVSearchActivity::TV_MODE) {
++                                if (cm0::compactLayout() || TVSearchActivity::TV_MODE) {
+                                     Intent::openTVSearch();
+@@ -49,2 +50,16 @@
+
++    if (cm0::compactLayout()) {
++        // The outer Home icon and Search button are siblings of the active feed.
++        auto refresh = [this](brls::View*) {
++            auto* page = tabFrame->getActiveTab();
++            if (!page) return false;
++            for (const auto& action : page->getActions()) {
++                if (*action == int(ShortcutHelper::getRefresh()) && action->isAvailable())
++                    return action->getActionListener()(page);
++            }
++            return false;
++        };
++        this->registerTabAction("", brls::BUTTON_X, ShortcutHelper::getRefresh(), refresh, true);
++    }
++
+     this->search->registerClickAction([](brls::View* view) -> bool {
+@@ -66,3 +81,3 @@
+ void HomeTab::openSearch() {
+-    if (TVSearchActivity::TV_MODE) {
++    if (cm0::compactLayout() || TVSearchActivity::TV_MODE) {
+         Intent::openTVSearch();

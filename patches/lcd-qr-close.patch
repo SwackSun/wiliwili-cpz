@@ -1,0 +1,6 @@
+--- mine_qr_login.hpp
++++ mine_qr_login.hpp
+@@ -44,1 +44,3 @@
++    void closeLcdLogin();
++
+     void onLoginError();

@@ -1,0 +1,7 @@
+--- mine_history.cpp
++++ mine_history.cpp
+@@ -37,3 +37,3 @@
+             author     = r.show_title;
+-        } else if (!r.show_title.empty()) {
++        } else if (!r.show_title.empty() && author != r.show_title) {
+             author += " - " + r.show_title;

@@ -1,0 +1,51 @@
+<brls:Box
+        marginLeft="2">
+    <AutoTabFrame
+            id="home/tab/frame"
+            defaultTab="1"
+            tabHeight="40"
+            tabItemActiveTextColor="@theme/color/bilibili"
+            disableNavigationRight="true"
+            sidebarPosition="top">
+
+        <Tab label="@i18n/wiliwili/home/live/tab"
+             fontSize="20">
+            <HomeLive/>
+        </Tab>
+
+        <Tab label="@i18n/wiliwili/home/rcmd/tab"
+             fontSize="20">
+            <HomeRecommends/>
+        </Tab>
+
+        <Tab label="@i18n/wiliwili/home/hots/tab" focusRight="home/search"
+             fontSize="20">
+            <HomeHotsAll/>
+        </Tab>
+
+    </AutoTabFrame>
+    <brls:Box
+            positionType="absolute"
+            positionRight="0"
+            positionTop="0"
+            width="84"
+            height="40"
+            alignItems="center"
+            wireframe="false">
+        <CustomButton
+                id="home/search"
+                focusable="true"
+                highlightCornerRadius="8"
+                hideHighlightBackground="true"
+                width="78"
+                height="35"
+                backgroundColor="#E3E5E7"
+                paddingLeft="6"
+                cornerRadius="6">
+            <brls:Label
+                    fontSize="20"
+                    textColor="#18191c"
+                    text="@i18n/wiliwili/search/tab"/>
+        </CustomButton>
+    </brls:Box>
+</brls:Box>

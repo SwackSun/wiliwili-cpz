@@ -1,18 +1,92 @@
 --- mine_qr_login.cpp
 +++ mine_qr_login.cpp
-@@ -9,4 +9,5 @@
+@@ -9,7 +9,27 @@
 
  #include "fragment/mine_qr_login.hpp"
 +#include "account-http.hpp"
++#include "playback-display.hpp"
++#include <cstdint>
++#include <vector>
  #include "utils/config_helper.hpp"
  #include "bilibili/result/mine_result.h"
-@@ -20,4 +21,5 @@
+
++// One texel per module keeps the LCD code sharp when scaled to the panel height.
++static void setLcdLoginCode(QRImage* image, const std::string& url) {
++    const auto code = QrCode::encodeText(url.c_str(), QrCode::Ecc::LOW);
++    constexpr int border = 4;
++    const int size = code.getSize();
++    const int side = size + 2 * border;
++    std::vector<uint32_t> pixels(side * side, UINT32_MAX);
++    for (int y = 0; y < size; ++y)
++        for (int x = 0; x < size; ++x)
++            if (code.getModule(x, y)) pixels[(y + border) * side + x + border] = 0xff000000;
++    const int tex = nvgCreateImageRGBA(brls::Application::getNVGContext(), side, side, NVG_IMAGE_NEAREST,
++                                        reinterpret_cast<const unsigned char*>(pixels.data()));
++    image->setFreeTexture(true);
++    image->innerSetImage(tex);
++}
++
+ MineQrLogin::MineQrLogin(loginStatusEvent cb) : loginCb(std::move(cb)) {
+     this->inflateFromXMLRes("xml/fragment/mine_qr_login.xml");
+@@ -20,4 +40,5 @@
  MineQrLogin::~MineQrLogin() {
      brls::Logger::debug("Fragment MineQrLoginActivity: delete");
 +    cm0::cancelLoginKey(this->oauthKey);
      this->cancel = true;
  }
-@@ -66,11 +68,16 @@
+@@ -29,4 +50,10 @@
+     brls::sync([ASYNC_TOKEN]() {
+         ASYNC_RELEASE
++        if (cm0::compactLayout()) {
++            qrImage->setVisibility(brls::Visibility::GONE);
++            hint->setVisibility(brls::Visibility::VISIBLE);
++            hint->setText("wiliwili/mine/login/network_error"_i18n);
++            return;
++        }
+         this->qrImage->setQRMainColor(brls::Application::getTheme().getColor("font/grey"));
+         qrImage->setImageFromQRContent("");
+@@ -38,4 +65,10 @@
+     brls::sync([ASYNC_TOKEN, url]() {
+         ASYNC_RELEASE
++        if (cm0::compactLayout()) {
++            setLcdLoginCode(qrImage, url);
++            qrImage->setVisibility(brls::Visibility::VISIBLE);
++            hint->setVisibility(brls::Visibility::GONE);
++            return;
++        }
+         qrImage->setQRMainColor(RGBA(0, 0, 0, 255));
+         qrImage->setImageFromQRContent(url);
+@@ -47,11 +80,28 @@
+     brls::sync([ASYNC_TOKEN, msg]() {
+         ASYNC_RELEASE
++        if (cm0::compactLayout()) {
++            const bool scanning = msg == "wiliwili/mine/login/need_scan"_i18n;
++            qrImage->setVisibility(scanning ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
++            hint->setVisibility(scanning ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
++        }
+         this->hint->setText(msg);
+     });
+ }
+
+-void MineQrLogin::onLoginSuccess() { this->dismiss(); }
++void MineQrLogin::closeLcdLogin() {
++    const auto stack = brls::Application::getActivitiesStack();
++    if (cancel || stack.empty() || stack.back()->getContentView() != this) return;
++    cancel = true;
++    cm0::cancelLoginKey(oauthKey);
++    brls::Application::popActivity(brls::TransitionAnimation::NONE);
++}
++
++void MineQrLogin::onLoginSuccess() {
++    if (cm0::compactLayout()) closeLcdLogin();
++    else this->dismiss();
++}
+
+ void MineQrLogin::onLoginError() {
++    if (cm0::compactLayout()) return; // The status label replaces the expired code.
+     ASYNC_RETAIN
+     brls::sync([ASYNC_TOKEN]() {
+@@ -66,11 +116,17 @@
      BILI::get_login_url_v2(
          [ASYNC_TOKEN](const std::string& url, const std::string& key) {
 -            ASYNC_RELEASE
@@ -22,6 +96,7 @@
 -            this->checkLogin();
 +            brls::sync([ASYNC_TOKEN, url, key] {
 +                ASYNC_RELEASE
++                if (cancel) return;
 +                cm0::selectLoginKey(key);
 +                this->oauthKey = key;
 +                this->login_url = url;
@@ -35,7 +110,7 @@
 +        });
  }
 
-@@ -85,40 +92,43 @@
+@@ -85,40 +141,44 @@
          this->oauthKey, "wiliwili - " + APPVersion::instance().getPlatform(), ProgramConfig::instance().getDeviceID(),
          [ASYNC_TOKEN](bilibili::LoginInfo info) {
 -            this->loginCb.fire(info);
@@ -76,6 +151,7 @@
 -            }
 +            brls::sync([ASYNC_TOKEN, info] {
 +                ASYNC_RELEASE
++                if (cancel) return;
 +                this->loginCb.fire(info);
 +                switch (info) {
 +                    case bilibili::LoginInfo::OAUTH_KEY_TIMEOUT:

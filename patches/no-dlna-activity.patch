@@ -1,10 +1,26 @@
 --- activity_helper.cpp
 +++ activity_helper.cpp
-@@ -15 +14,0 @@
+@@ -11,2 +11,4 @@
+ #include "activity/search_activity_tv.hpp"
++#include "lcd-search-input.hpp"
++#include "playback-display.hpp"
+ #include "activity/pgc_index_activity.hpp"
+@@ -14,3 +16,2 @@
+ #include "activity/gallery_activity.hpp"
 -#include "activity/dlna_activity.hpp"
-@@ -117,5 +115,0 @@
+ #include "activity/dynamic_activity.hpp"
+@@ -85,3 +86,5 @@
+ void Intent::openTVSearch() {
+-    auto activity = new TVSearchActivity();
++    brls::Activity* activity;
++    if (cm0::compactLayout()) activity = new cm0::LcdSearchActivity();
++    else activity = new TVSearchActivity();
+     brls::Application::pushActivity(activity, brls::TransitionAnimation::NONE);
+@@ -116,7 +119,2 @@
+
 -void Intent::openDLNA() {
 -    auto activity = new DLNAActivity();
 -    brls::Application::pushActivity(activity, brls::TransitionAnimation::NONE);
 -}
 -
+ void Intent::openActivity(const std::string& id) {

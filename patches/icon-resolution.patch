@@ -1,0 +1,19 @@
+--- svg_image.cpp
++++ svg_image.cpp
+@@ -5,4 +5,5 @@
+ #include "view/svg_image.hpp"
+
++#include <algorithm>
+ #include <fstream>
+ #include <borealis/core/application.hpp>
+@@ -131,6 +132,8 @@
+     if (!this->document) return;
+
+-    float width  = this->_width * brls::Application::windowScale;
+-    float height = this->_height * brls::Application::windowScale;
++    // Retain the original TV icon texture budget when text renders at 720p.
++    const float scale = std::min(brls::Application::windowScale, 640.f / 960.f);
++    float width  = this->_width * scale;
++    float height = this->_height * scale;
+     auto bitmap  = this->document->renderToBitmap(width, height);
+     bitmap.convertToRGBA();

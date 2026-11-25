@@ -1,0 +1,57 @@
+--- auto_tab_frame.cpp
++++ auto_tab_frame.cpp
+@@ -25,2 +25,3 @@
+ #include "view/svg_image.hpp"
++#include "playback-display.hpp"
+ #include "view/button_refresh.hpp"
+@@ -409,3 +410,4 @@
+     if (value) {
+-        this->sidebar->setPadding(8, 20, 8, 20);
++        if (cm0::compactLayout()) this->sidebar->setPadding(2, 4, 2, 4);
++        else this->sidebar->setPadding(8, 20, 8, 20);
+         this->sidebar->setAxis(brls::Axis::ROW);
+@@ -424,2 +426,16 @@
+     tab->setHorizontalMode(this->isHorizontal);
++    if (cm0::compactLayout() && id == "home/tab/frame") {
++        sidebar->setPaddingRight(84);
++        tab->setGrow(1);
++    }
++    if (cm0::compactLayout() && (id == "inbox/tab/frame" || id == "mine/tab/frame")) {
++        // The four inbox categories share the whole row; the two profile tabs keep natural widths.
++        if (id == "inbox/tab/frame") tab->setGrow(1);
++        tab->setPadding(0, 10, 0, 10);
++        tab->setMargins(0, 3, 0, 3);
++    }
++    if (cm0::compactLayout() && id == "setting/tabFrame") {
++        sidebar->setPadding(4, 2, 4, 2);
++        tab->setHeight(42);
++    }
+     tab->setGroup(&this->group);
+@@ -926,4 +942,9 @@
+         this->setAxis(brls::Axis::COLUMN);
+-        this->setPadding(0, 10, 0, 10);
++        const int sides = cm0::compactLayout() ? 4 : 10;
++        this->setPadding(0, sides, 0, sides);
+         if (this->tabStyle == AutoTabBarStyle::ACCENT) {
++            if (cm0::compactLayout()) {
++                icon_box->setMargins(0, 0, 0, 0);
++                label->setMarginBottom(0);
++            }
+             this->accent->setSize(brls::Size(View::AUTO, 4));
+@@ -935,2 +956,16 @@
+         this->setAxis(brls::Axis::ROW);
++        if (cm0::compactLayout() && getLabel().empty() && icon->getVisibility() == brls::Visibility::VISIBLE) {
++            setHeight(48);
++            setShrink(0);
++            icon_box->setMargins(0, 0, 0, 0);
++            label->setVisibility(brls::Visibility::GONE);
++            subtitle->setVisibility(brls::Visibility::GONE);
++            // Keep the selection stripe outside the square icon's layout space.
++            accent->setPositionType(brls::PositionType::ABSOLUTE);
++            accent->setMargins(0, 0, 0, 0);
++            accent->setPositionLeft(0);
++            accent->setPositionTop(8);
++            accent->setDimensions(3, 32);
++            return;
++        }
+         if (this->tabStyle == AutoTabBarStyle::ACCENT) {

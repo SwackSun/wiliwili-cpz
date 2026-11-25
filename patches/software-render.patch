@@ -14,47 +14,59 @@
 +void cm0::setDisplayResume(bool playing) { displayResume = playing; }
 
  #include <cstdlib>
-@@ -332,5 +341,5 @@
+@@ -265,2 +274,3 @@
+ MPVCore::MPVCore() {
++    rect = {0, 0, 0, 0}; // Allocate the software texture when the player view has a size.
+ #if defined(MPV_BUNDLE_DLL)
+@@ -332,5 +342,5 @@
          mpvSetOptionString(mpv, "vd-lavc-fast", "yes");
          if (mpvClientApiVersion() >= MPV_MAKE_VERSION(2, 2)) {
 -            mpvSetOptionString(mpv, "profile", "fast");
 +            mpvSetOptionString(mpv, "profile", "fast,sw-fast");
          } else {
              mpvSetOptionString(mpv, "scale", "bilinear");
-@@ -532,4 +541,5 @@
+@@ -532,4 +542,5 @@
      brls::Application::getExitEvent()->subscribe([]() { disableDimming(false); });
 
 +    cm0::attachPlayer(mpv, MPVCore::LOW_QUALITY);
      this->initializeVideo();
  }
-@@ -542,4 +552,5 @@
+@@ -542,4 +553,5 @@
 
  void MPVCore::clean() {
 +    cm0::attachPlayer(nullptr, false);
      check_error(mpvCommandString(this->mpv, "quit"));
 
-@@ -693,4 +704,7 @@
+@@ -693,6 +705,13 @@
      const static int mpvImageFlags = 0;
  #endif
+-    int drawWidth  = rect.getWidth() * brls::Application::windowScale;
+-    int drawHeight = rect.getHeight() * brls::Application::windowScale;
 +    cm0::setVideoFullscreen(std::abs(rect.getMinX()) < 1 && std::abs(rect.getMinY()) < 1 &&
 +        std::abs(rect.getWidth() - brls::Application::contentWidth) < 2 &&
 +        std::abs(rect.getHeight() - brls::Application::contentHeight) < 2);
-     int drawWidth  = rect.getWidth() * brls::Application::windowScale;
-     int drawHeight = rect.getHeight() * brls::Application::windowScale;
-@@ -705,5 +719,5 @@
++    // Keep software video buffers within the previous budget. The native
++    // video plane receives the decoder frame at its original resolution.
++    const float scale = std::min({brls::Application::windowScale,
++        640.f / std::max(1.f, rect.getWidth()), 360.f / std::max(1.f, rect.getHeight())});
++    int drawWidth  = rect.getWidth() * scale;
++    int drawHeight = rect.getHeight() * scale;
+     if (drawWidth == 0 || drawHeight == 0) return;
+     int frameSize = drawWidth * drawHeight;
+@@ -705,5 +724,5 @@
 
      if (pixels == nullptr) {
 -        pixels             = malloc(frameSize * PIXCEL_SIZE);
 +        pixels             = calloc(frameSize, PIXCEL_SIZE);
          mpv_params[3].data = pixels;
      }
-@@ -789,4 +803,5 @@
+@@ -789,4 +808,5 @@
 
      auto *vg = brls::Application::getNVGContext();
 +    if (cm0::drawVideoPlane(vg, rect.getMinX(), rect.getMinY(), rect.getWidth(), rect.getHeight(), alpha)) return;
      nvgUpdateImage(vg, nvg_image, (const unsigned char *)pixels);
 
-@@ -923,4 +938,16 @@
+@@ -923,4 +943,16 @@
                  }
              } break;
 +            case MPV_EVENT_VIDEO_RECONFIG: {
@@ -71,14 +83,14 @@
 +            }
              case MPV_EVENT_FILE_LOADED:
                  brls::Logger::info("========> MPV_EVENT_FILE_LOADED");
-@@ -933,5 +960,5 @@
+@@ -933,5 +965,5 @@
                  command_async("playlist-clear");
 
 -                if (AUTO_PLAY) {
 +                if (displayResume.value_or(AUTO_PLAY)) {
                      mpvCoreEvent.fire(MpvEventEnum::MPV_RESUME);
                      this->resume();
-@@ -939,5 +966,9 @@
+@@ -939,5 +971,9 @@
                      mpvCoreEvent.fire(MpvEventEnum::MPV_PAUSE);
                      this->pause();
 +                    // Present one frame of the replacement stream, then let mpv remain paused.
@@ -88,13 +100,13 @@
 +                displayResume.reset();
                  break;
              case MPV_EVENT_START_FILE:
-@@ -1171,4 +1202,5 @@
+@@ -1171,4 +1207,5 @@
 
  void MPVCore::setUrl(const std::string &url, const std::string &extra, const std::string &method) {
 +    if (method == "replace") displayResume.reset();
      brls::Logger::debug("{} Url: {}, extra: {}", method, url, extra);
      if (extra.empty()) {
-@@ -1245,7 +1277,9 @@
+@@ -1245,7 +1282,9 @@
 
  void MPVCore::setMirror(bool value) {
 +    const bool wasMirrored = MPVCore::VIDEO_MIRROR;

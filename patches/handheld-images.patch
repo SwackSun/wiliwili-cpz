@@ -7,3 +7,10 @@
 +#if defined(__PSV__) || defined(__linux__)
  #ifdef BOREALIS_USE_GXM
      inline static const std::string h_ext           = "@256w_144h_1c" IMAGE_EXT;
+@@ -72,4 +72,4 @@
+ #else
+-    inline static const std::string h_ext           = "@224w_126h_1c" IMAGE_EXT;
+-    inline static const std::string v_ext           = "@156w_210h_1c" IMAGE_EXT;
++    inline static const std::string h_ext           = "@144w_81h_1c" IMAGE_EXT;
++    inline static const std::string v_ext           = "@108w_144h_1c" IMAGE_EXT;
+     inline static const std::string face_ext        = "@48w_48h_1c_1s" IMAGE_EXT;

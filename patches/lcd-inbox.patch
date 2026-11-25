@@ -1,0 +1,20 @@
+--- inbox_view.cpp
++++ inbox_view.cpp
+@@ -5,2 +5,3 @@
+ #include "fragment/inbox_chat.hpp"
++#include "playback-display.hpp"
+ #include "view/button_close.hpp"
+@@ -74,3 +75,3 @@
+         recycler->present(view);
+-        view->setWidth(600);
++        view->setWidth(cm0::compactLayout() ? recycler->getWidth() : 600);
+     }
+@@ -162,2 +163,8 @@
+
++    if (cm0::compactLayout()) {
++        tabFrame->getItem(0)->registerAction(ShortcutHelper::getRefresh(), [this](brls::View*) {
++            recyclingGrid->refresh();
++            return true;
++        });
++    }
+     this->requestData(true);

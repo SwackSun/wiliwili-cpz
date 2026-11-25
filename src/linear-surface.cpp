@@ -44,7 +44,10 @@ LinearSurface::LinearSurface(int width, int height)
 std::unique_ptr<LinearSurface> LinearSurface::create(int width, int height) {
     if (width <= 0 || width > 4096 || height <= 0 || height > 2160) return {};
     auto surface = std::unique_ptr<LinearSurface>(new LinearSurface(width, height));
-    if (!surface->attach()) return {};
+    if (surface->attach()) return surface;
+    surface.reset();
+    surface.reset(new LinearSurface(width, height));
+    if (!surface->attachTexture()) return {};
     return surface;
 }
 
@@ -90,6 +93,25 @@ bool LinearSurface::attach() {
     bindImage(GL_RENDERBUFFER, image);
     destroyImage(display, image);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, color_);
+    return attachStencil();
+}
+
+// The SDL pbuffer only carries the context. Use a readable FBO on systems
+// without a DMA heap, including the software renderer.
+bool LinearSurface::attachTexture() {
+    glGenFramebuffers(1, &fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    glGenTextures(1, &texture_);
+    glBindTexture(GL_TEXTURE_2D, texture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return attachStencil();
+}
+
+bool LinearSurface::attachStencil() {
     glGenRenderbuffers(1, &stencil_);
     glBindRenderbuffer(GL_RENDERBUFFER, stencil_);
     glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, width_, height_);
@@ -99,7 +121,7 @@ bool LinearSurface::attach() {
 }
 
 bool LinearSurface::read(std::vector<uint32_t>& rgb) const {
-    if (rgb.size() != size_t(width_) * height_) return false;
+    if (!mapped() || rgb.size() != size_t(width_) * height_) return false;
     // Finish GPU writes before opening the CPU's cache-coherent read interval.
     glFinish();
     if (!syncBuffer(fd_, DMA_BUF_SYNC_START)) return false;
@@ -112,6 +134,7 @@ bool LinearSurface::read(std::vector<uint32_t>& rgb) const {
 LinearSurface::~LinearSurface() {
     if (context_ != EGL_NO_CONTEXT && context_ == eglGetCurrentContext()) {
         glDeleteFramebuffers(1, &fbo_);
+        glDeleteTextures(1, &texture_);
         glDeleteRenderbuffers(1, &color_);
         glDeleteRenderbuffers(1, &stencil_);
     }

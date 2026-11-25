@@ -12,17 +12,21 @@ class LinearSurface {
 public:
     static std::unique_ptr<LinearSurface> create(int width, int height);
     ~LinearSurface();
+    bool mapped() const { return fd_ >= 0; }
     bool read(std::vector<uint32_t>& rgb) const;
     LinearSurface(const LinearSurface&) = delete;
     LinearSurface& operator=(const LinearSurface&) = delete;
 private:
     LinearSurface(int width, int height);
     bool attach();
+    bool attachTexture();
+    bool attachStencil();
     int width_, height_, stride_;
     size_t length_;
     int fd_ = -1;
     void* mapping_;
     EGLContext context_;
+    GLuint texture_ = 0;
     GLuint fbo_ = 0, color_ = 0, stencil_ = 0;
 };
 }

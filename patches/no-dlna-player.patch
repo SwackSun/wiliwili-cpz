@@ -1,8 +1,11 @@
 --- video_view.cpp
 +++ video_view.cpp
-@@ -24 +23,0 @@
+@@ -23,3 +23,2 @@
+ #include "fragment/player_setting.hpp"
 -#include "fragment/player_dlna_search.hpp"
-@@ -424,12 +423 @@
+ #include "view/video_view.hpp"
+@@ -423,14 +422,3 @@
+
 -    /// 投屏按钮
 -    this->btnCastIcon->getParent()->registerClickAction([this](...) {
 -        this->pause();
@@ -16,3 +19,22 @@
 -    this->btnCastIcon->getParent()->addGestureRecognizer(
 -        new brls::TapGestureRecognizer(this->btnCastIcon->getParent()));
 +    hideDLNAButton();
+
+@@ -1298,8 +1286,4 @@
+
+-            // 当最前方的 activity 内不包含 videoView 时，不执行关闭全屏
+-            brls::Activity* top = activityStack[activityStack.size() - 1];
+-            if (!dynamic_cast<BasePlayerActivity*>(top)) {
+-                // 判断最顶层是否为video
+-                if (!dynamic_cast<VideoView*>(top->getContentView()->getView("video"))) return;
+-            }
++            // A delayed second exit can run after the fullscreen activity has been popped.
++            if (activityStack.empty() || activityStack.back()->getView("video") != this) return;
+
+@@ -1543,5 +1527,3 @@
+ void VideoView::registerMpvEvent() {
+-    if (registerMPVEvent) {
+-        brls::Logger::error("VideoView already register MPV Event");
+-    }
++    if (registerMPVEvent) return;
+     eventSubscribeID = mpvCore->getEvent()->subscribe([this](MpvEventEnum event) {

@@ -1,0 +1,17 @@
+--- edit_text_dialog.cpp
++++ edit_text_dialog.cpp
+@@ -83,4 +83,14 @@
+     {
+         this->inflateFromXMLString(editTextDialogXML);
++        if (Application::contentWidth < 720) {
++            const float panelWidth = Application::contentWidth - 24;
++            getView("brls/dialog/applet")->setWidth(panelWidth);
++            label->setWidth(panelWidth - 32);
++            label->setMargins(12, 16, 8, 16);
++            count->setWidth(panelWidth - 32);
++            count->setMarginRight(16);
++            header->setMargins(8, 0, 8, 0);
++            container->setJustifyContent(JustifyContent::CENTER);
++        }
+
+         // submit text

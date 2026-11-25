@@ -1,0 +1,63 @@
+--- a/source/view/danmaku_core.cpp
++++ b/source/view/danmaku_core.cpp
+@@ -12,6 +12,7 @@
+ #include <lunasvg.h>
+
+ #include "view/danmaku_core.hpp"
++#include "playback-display.hpp"
+ #include "utils/config_helper.hpp"
+ #include "utils/string_helper.hpp"
+ #include "utils/number_helper.hpp"
+@@ -574,6 +575,15 @@
+     size_t LINES = height / lineHeight * DANMAKU_STYLE_AREA * 0.01f;
+     if (LINES > lineNum) LINES = lineNum;
+
++    bool useClassic = DANMAKU_STYLE_FONT != DanmakuFontStyle::DANMAKU_FONT_STROKE ||
++        DANMAKU_FONT != brls::Application::getDefaultFont();
++#if defined(DRAW_DANMAKU_MASK)
++    useClassic |= DANMAKU_SMART_MASK && maskData.isLoaded() && maskTex > 0;
++#endif
++    const auto rolling = DANMAKU_FILTER_SHOW_SCROLL ?
++        cm0::rollingDanmaku(vg, x, y, width, height, lineHeight, useClassic) : cm0::RollingDanmaku{};
++    const size_t scrollLimit = rolling.maxLines ? std::min(LINES, size_t(rolling.maxLines)) : LINES;
++
+     //取出需要的弹幕
+     float bounds[4];
+     for (size_t j = this->danmakuIndex; j < this->danmakuData.size(); j++) {
+@@ -638,9 +648,15 @@
+                 continue;
+             }
+
+-            // 画弹幕
+-            nvgFontSize(vg, DANMAKU_STYLE_FONTSIZE * i.fontSize);
+-            i.draw(vg, x + width - position, y + i.line * lineHeight + 5, alpha);
++            if (size_t(i.line) >= scrollLimit) continue;
++            const float textX = x + width - position;
++            const float textY = y + i.line * lineHeight + 5;
++            const bool plainText = i.image == DanmakuImageType::DANMAKU_IMAGE_NONE;
++            const float size = DANMAKU_STYLE_FONTSIZE * i.fontSize * (plainText ? rolling.fontScale : 1);
++            if (!plainText || !rolling.paint(i.msg, size, i.fontColor, i.color.a * alpha, textX, textY)) {
++                nvgFontSize(vg, size);
++                i.draw(vg, textX, textY, alpha);
++            }
+             continue;
+         }
+
+@@ -743,13 +759,15 @@
+             if (i.image != DanmakuImageType::DANMAKU_IMAGE_NONE) {
+                 i.length = DANMAKU_STYLE_FONTSIZE * 3;
+             } else {
+-                nvgFontSize(vg, DANMAKU_STYLE_FONTSIZE * i.fontSize);
++                const float fontScale = (i.type == 4 || i.type == 5) ? 1 : rolling.fontScale;
++                nvgFontSize(vg, DANMAKU_STYLE_FONTSIZE * i.fontSize * fontScale);
+                 nvgTextBounds(vg, 0, 0, i.msg.c_str(), nullptr, bounds);
+                 i.length = bounds[2] - bounds[0];
+             }
+             i.speed   = (width + i.length) / SECOND;
+             i.showing = true;
+-            for (size_t k = 0; k < LINES; k++) {
++            const size_t tracks = (i.type == 4 || i.type == 5) ? LINES : scrollLimit;
++            for (size_t k = 0; k < tracks; k++) {
+                 if (i.type == 4) {
+                     //底部
+                     if (i.time < centerLines[LINES - k - 1]) continue;

@@ -1,0 +1,23 @@
+--- dialog.cpp
++++ dialog.cpp
+@@ -141,2 +141,7 @@
+     this->inflateFromXMLString(dialogXML);
++    if (Application::contentWidth < 720) {
++        appletFrame->setWidth(Application::contentWidth - 24);
++        button1->getParent()->setHeight(38);
++        button3->setHeight(38);
++    }
+     container->addView(contentView);
+@@ -169,2 +174,12 @@
+     this->inflateFromXMLString(dialogXML);
++    if (Application::contentWidth < 720) {
++        appletFrame->setWidth(Application::contentWidth - 24);
++        button1->getParent()->setHeight(38);
++        button3->setHeight(38);
++    }
++    if (Application::contentWidth < 720) {
++        box->setPadding(10, 12, 10, 12);
++        label->setWidth(Application::contentWidth - 48);
++        label->setFontSize(18);
++    }
+     container->addView(box);

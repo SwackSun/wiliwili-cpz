@@ -14,5 +14,5 @@ flock 9
 "$root/scripts/prepare-device" "$root" "$build" "$default_stage"
 "$cmake" --preset device -S "$root"
 "$cmake" --build "$build/device" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
-DESTDIR="$stage" "$cmake" --install "$build/device" --component wiliwili
-printf 'Staged wiliwili in %s\n' "$stage"
+DESTDIR="$stage" "$cmake" --install "$build/device" --component wiliwili-cpz
+printf 'Staged wiliwili-cpz in %s\n' "$stage"

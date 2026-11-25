@@ -1,0 +1,12 @@
+<brls:AppletFrame headerHidden="true" footerHidden="true">
+    <brls:Box axis="column" grow="1" padding="8">
+        <brls:Box height="36" alignItems="center" paddingLeft="8" paddingRight="8">
+            <brls:Box id="search/box" grow="1" height="30" paddingLeft="8" paddingRight="8"
+                      focusable="true" alignItems="center" backgroundColor="@theme/color/grey_1" cornerRadius="4">
+                <SVGImage width="20" height="20" SVG="@res/svg/header-search-dark.svg"/>
+                <brls:Label id="search/label/key" marginLeft="8" fontSize="20" singleLine="true" grow="1"/>
+            </brls:Box>
+        </brls:Box>
+        <SearchVideo id="search/results" grow="1"/>
+    </brls:Box>
+</brls:AppletFrame>

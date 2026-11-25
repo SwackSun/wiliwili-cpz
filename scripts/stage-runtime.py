@@ -9,7 +9,7 @@ import sys
 
 media, prefix, base, source_root = map(Path, sys.argv[1:])
 target = media / 'target'
-destination = prefix / 'lib/wiliwili'
+destination = prefix / 'lib/wiliwili-cpz'
 destination.mkdir(parents=True, exist_ok=True)
 readelf = media / 'host/bin/aarch64-buildroot-linux-gnu-readelf'
 strip = media / 'host/bin/aarch64-buildroot-linux-gnu-strip'
@@ -58,7 +58,7 @@ def strip_for_delivery(elf):
     elf.write_bytes(data)
 
 
-pending = [prefix / 'bin/wiliwili']
+pending = [prefix / 'bin/wiliwili-cpz']
 staged = set()
 strip_for_delivery(pending[0])
 

@@ -1,0 +1,97 @@
+--- dynamic_video.cpp
++++ dynamic_video.cpp
+@@ -23,16 +23,18 @@
+ void DynamicVideoRequest::setCurrentUser(int64_t mid) { this->currentUser = mid; }
+ 
+ void DynamicVideoRequest::requestData(bool refresh, DynamicRequestMode mode) {
+-    if (refresh) {
+-        currentVideoPage     = 1;
+-        currentVideoOffset   = "";
+-        currentArticlePage   = 1;
+-        currentArticleOffset = "";
+-    }
+     if (mode == DynamicRequestMode::Article) {
++        if (refresh) {
++            currentArticlePage = 1;
++            currentArticleOffset.clear();
++        }
+         // 图文
+         this->requestDynamicArticleList(currentArticlePage, currentArticleOffset);
+     } else {
++        if (refresh) {
++            currentVideoPage = 1;
++            currentVideoOffset.clear();
++        }
+         // 视频
+         this->requestVideoData(currentVideoPage, currentVideoOffset, currentUser);
+     }
+@@ -53,19 +55,24 @@
+         return;
+     }
+     brls::Logger::debug("request dynamic video list: user: {}; page: {}; offset: {}", currentUser, page, offset);
++    ASYNC_RETAIN
+     BILI::dynamic_video(
+         page, offset,
+-        [this](const bilibili::DynamicVideoListResultWrapper &result) {
+-            if (currentVideoPage != result.page) {
+-                brls::Logger::error("request dynamic video error: current page: {}, got: {}", currentVideoPage,
+-                                    result.page);
+-                return;
+-            }
+-            currentVideoOffset = result.offset;
+-            currentVideoPage   = result.page + 1;
+-            this->onDynamicVideoList(result.items, result.page);
++        [ASYNC_TOKEN](const bilibili::DynamicVideoListResultWrapper &result) {
++            brls::sync([ASYNC_TOKEN, result]() {
++                ASYNC_RELEASE
++                if (currentVideoPage != result.page) return;
++                currentVideoOffset = result.offset;
++                currentVideoPage = result.page + 1;
++                onDynamicVideoList(result.items, result.page);
++            });
+         },
+-        [this](BILI_ERR) { this->onVideoError(error); });
++        [ASYNC_TOKEN](BILI_ERR) {
++            brls::sync([ASYNC_TOKEN, error]() {
++                ASYNC_RELEASE
++                onVideoError(error);
++            });
++        });
+ }
+ 
+ void DynamicVideoRequest::requestDynamicArticleList(unsigned int page, const std::string &offset) {
+@@ -75,19 +82,24 @@
+         return;
+     }
+     brls::Logger::debug("request dynamic article list: user: {}; page: {}; offset: {}", currentUser, page, offset);
++    ASYNC_RETAIN
+     BILI::dynamic_article(
+         page, offset, currentUser,
+-        [this](const bilibili::DynamicArticleListResultWrapper &result) {
+-            if (currentArticlePage != result.page) {
+-                brls::Logger::error("request dynamic video error: current page: {}, got: {}", currentArticlePage,
+-                                    result.page);
+-                return;
+-            }
+-            currentArticleOffset = result.offset;
+-            currentArticlePage   = result.page + 1;
+-            this->onDynamicArticleList(result.items, result.page);
++        [ASYNC_TOKEN](const bilibili::DynamicArticleListResultWrapper &result) {
++            brls::sync([ASYNC_TOKEN, result]() {
++                ASYNC_RELEASE
++                if (currentArticlePage != result.page) return;
++                currentArticleOffset = result.offset;
++                currentArticlePage = result.page + 1;
++                onDynamicArticleList(result.items, result.page);
++            });
+         },
+-        [this](BILI_ERR) { this->onArticleError(error); });
++        [ASYNC_TOKEN](BILI_ERR) {
++            brls::sync([ASYNC_TOKEN, error]() {
++                ASYNC_RELEASE
++                onArticleError(error);
++            });
++        });
+ }
+ 
+ void DynamicVideoRequest::requestUserDynamicVideoList(int64_t mid, int pn, int ps) {

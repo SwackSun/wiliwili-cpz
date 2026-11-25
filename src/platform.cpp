@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "device-runtime.hpp"
+#include "danmaku-strip.hpp"
 #include "linear-surface.hpp"
+#include "lcd-search-input.hpp"
 #include "native-video.hpp"
 #include "playback-display.hpp"
 #include <SDL2/SDL.h>
@@ -8,9 +10,13 @@
 #include "scancodes_linux.h"
 #include <borealis/core/application.hpp>
 #include "view/mpv_core.hpp"
+#include "view/video_view.hpp"
+#include "fragment/mine_qr_login.hpp"
 #include "view/recycling_grid.hpp"
 #include "utils/activity_helper.hpp"
 #include <borealis/views/dialog.hpp>
+#include "activity/main_activity.hpp"
+#include "activity/setting_activity.hpp"
 #include "activity/player_activity.hpp"
 #include "activity/live_player_activity.hpp"
 #include <algorithm>
@@ -30,11 +36,15 @@
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
+#include <utility>
 #include <vector>
 
 int runClient(int, char**, const std::string&);
 
 extern "C" {
+struct SDL_VideoDevice;
+EGLSurface __real_SDL_EGL_CreateOffscreenSurface(SDL_VideoDevice*, int, int);
+void __real_SDL_SetWindowSize(SDL_Window*, int, int);
 SDL_GLContext __real_SDL_GL_CreateContext(SDL_Window*);
 SDL_Window* __real_SDL_CreateWindow(const char*, int, int, int, int, Uint32);
 int __real_SDL_PollEvent(SDL_Event*);
@@ -49,8 +59,8 @@ int SDL_SendKeyboardText(const char*);
 
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr int width = 640;
-constexpr int height = 360;
+int width = 320;
+int height = 170;
 struct PlaybackGain {
     double volume;
     int mute;
@@ -73,11 +83,11 @@ struct Session {
     std::unique_ptr<cm0::Display> display;
     std::unique_ptr<cm0::Keyboard> keyboard;
     std::unique_ptr<cm0::LinearSurface> surface;
-    std::vector<unsigned char> rgba;
     std::vector<uint32_t> rgb;
     Clock::time_point nextProbe{};
     Clock::time_point firstFrame{};
     Clock::time_point nextNativeProbe{};
+    Clock::time_point lastNativeDraw{};
     std::string screenshot;
     unsigned frames = 0;
     std::unique_ptr<cm0::NativeVideo> native;
@@ -86,9 +96,12 @@ struct Session {
     bool hdmiAudio = false;
     std::optional<PlaybackGain> localGain, hdmiGain;
     bool autoAudio = false, lowQuality = false, scaled = false;
-    bool fullscreen = false, nativeFrame = false, drewVideo = false;
+    bool fullscreen = false, nativeFrame = false, drewVideo = false, drewVideoView = false;
     int targetWidth = 0, targetHeight = 0;
     bool quit = false;
+    bool lcdLayout = true;
+    bool startupLcdLayout = true;
+    bool reopen = false;
     bool waitForVideo = false;
     const void* renderedVideo = nullptr;
     bool videoUploaded = false;
@@ -133,17 +146,22 @@ void configureOutput(Session& s) {
 void selectOutput(Session& s) {
     s.native.reset();
     s.nativeFrame = false;
-    if (s.display && s.display->usingHdmi()) s.native = cm0::NativeVideo::open(width,height);
+    if (s.display && s.display->usingHdmi()) s.native = cm0::NativeVideo::open(640, 360);
     s.nextNativeProbe = Clock::now() + std::chrono::seconds(5);
     configureOutput(s);
 }
 
 class KeyboardHelp : public brls::Dialog {
 public:
-    KeyboardHelp() : brls::Dialog("Fn+A 静音　S / D 音量　U / I 内屏亮度\n"
-        "Q 播放 / 暂停　W / E 上一集 / 下一集\n"
-        "F / X / Z / C 方向　J 截屏　H 关闭说明\n"
-        "Enter 确认　Esc 返回　Fn+0 退出") {
+    KeyboardHelp() : brls::Dialog(cm0::compactLayout()
+        ? "Fn 锁定时 5 刷新列表　H 关闭说明\n"
+          "F / X / Z / C 方向　Enter 确认　Esc 返回\n"
+          "Q 播放 / 暂停　W / E 换集　J 截屏\n"
+          "A 静音　S / D 音量　U / I 亮度　0 退出"
+        : "Fn+A 静音　S / D 音量　U / I 内屏亮度\n"
+          "Q 播放 / 暂停　W / E 上一集 / 下一集\n"
+          "F / X / Z / C 方向　J 截屏　H 关闭说明\n"
+          "Enter 确认　Esc 返回　Fn+0 退出") {
         addButton("关闭", [] {});
     }
 };
@@ -231,16 +249,72 @@ bool mediaKey(Session& s, unsigned key) {
     return true;
 }
 
+char printableKey(SDL_Scancode code) {
+    const auto symbol = SDL_GetKeyFromScancode(code);
+    if (symbol < 32 || symbol > 126) return 0;
+    const auto mods = SDL_GetModState();
+    if (mods & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) return 0;
+    char value = static_cast<char>(symbol);
+    if (value >= 'a' && value <= 'z') {
+        if (bool(mods & KMOD_SHIFT) != bool(mods & KMOD_CAPS)) value -= 'a' - 'A';
+    } else if (mods & KMOD_SHIFT) {
+        constexpr std::string_view plain = "1234567890-=[]\\;',./`";
+        constexpr std::string_view shifted = "!@#$%^&*()_+{}|:\"<>?~";
+        auto pos = plain.find(value);
+        if (pos != plain.npos) value = shifted[pos];
+    }
+    return value;
+}
+
+void configureCanvas(bool hdmi, bool videoControls = false) {
+    width = hdmi ? (videoControls ? 640 : 1280) : 320;
+    height = hdmi ? (videoControls ? 360 : 720) : 170;
+}
+
+void configureLayoutSize(bool lcd) {
+    brls::Application::ORIGINAL_WINDOW_WIDTH = lcd ? 544 : 960;
+    brls::Application::ORIGINAL_WINDOW_HEIGHT = lcd ? 289 : 540;
+}
+
+void createSurface(Session& s) {
+    s.surface.reset();
+    s.surface = cm0::LinearSurface::create(width, height);
+    if (!s.surface) throw std::runtime_error("Cannot allocate the UI render target");
+    glViewport(0, 0, width, height);
+    std::cerr << "compositor: " << width << 'x' << height << " "
+              << (s.surface->mapped() ? "linear DMA buffer" : "GLES readback") << '\n';
+}
+
+void resizeCanvas(Session& s, bool hdmi, bool controls) {
+    const int previousWidth = width;
+    configureCanvas(hdmi, controls);
+    if (width == previousWidth) return;
+    createSurface(s);
+    __real_SDL_SetWindowSize(SDL_GL_GetCurrentWindow(), width, height);
+    brls::Application::setWindowSize(width, height);
+    std::vector<uint32_t>().swap(s.rgb);
+}
+
 void pollDevice() {
     auto& s = *session;
     auto now = Clock::now();
     if (s.display && now >= s.nextProbe) {
         const bool wasHdmi = s.display->usingHdmi();
+        const auto stack = brls::Application::getActivitiesStack();
         if (s.display->update()) {
-            selectOutput(s);
-            if (s.frames) s.display->present(s.rgb, width, height);
             if (wasHdmi != s.display->usingHdmi()) {
-                const auto stack = brls::Application::getActivitiesStack();
+                s.lcdLayout = !s.display->usingHdmi();
+                configureLayoutSize(s.lcdLayout);
+                if (stack.empty()) s.startupLcdLayout = s.lcdLayout;
+                else cm0::setClientDisplayLayout(s.lcdLayout);
+                s.native.reset();
+                s.lastNativeDraw = {};
+                resizeCanvas(s, s.display->usingHdmi(), false);
+                selectOutput(s);
+                for (auto* activity : stack) {
+                    if (auto* video = dynamic_cast<VideoView*>(activity->getView("video")))
+                        cm0::refreshVideoLayout(*video, s.lcdLayout);
+                }
                 for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
                     if (dynamic_cast<LiveActivity*>(*it)) break;
                     if (auto* player = dynamic_cast<BasePlayerActivity*>(*it)) {
@@ -248,6 +322,21 @@ void pollDevice() {
                         break;
                     }
                 }
+            } else {
+                selectOutput(s);
+                if (!s.rgb.empty()) s.display->present(s.rgb, width, height);
+            }
+        }
+        // The player can update its existing controls. Browsing layouts can
+        // have a different view tree, so rebuild once playback has been left.
+        if (s.startupLcdLayout != s.lcdLayout && !stack.empty()) {
+            const bool playing = std::any_of(stack.begin(), stack.end(), [](auto* activity) {
+                return dynamic_cast<BasePlayerActivity*>(activity) ||
+                    dynamic_cast<LiveActivity*>(activity) ||
+                    dynamic_cast<VideoView*>(activity->getView("video"));
+            });
+            if (!playing) {
+                s.reopen = s.quit = true;
             }
         }
         if (!s.native && s.display->usingHdmi() && now >= s.nextNativeProbe) selectOutput(s);
@@ -255,27 +344,44 @@ void pollDevice() {
         configureAudio(s);
         s.nextProbe = now + std::chrono::milliseconds(250);
     }
+    if (s.display && s.display->usingHdmi() && !s.quit) {
+        // Avoid resizing for a single missing video frame, e.g. during a seek.
+        const bool controls = s.native && s.lastNativeDraw != Clock::time_point{} &&
+            now - s.lastNativeDraw < std::chrono::seconds(1);
+        resizeCanvas(s, true, controls);
+    }
     if (!s.keyboard) return;
     for (auto key : s.keyboard->poll()) {
+        if (key.down && s.lcdLayout) {
+            const auto stack = brls::Application::getActivitiesStack();
+            if (!stack.empty()) {
+                if (key.code == KEY_ESC && dynamic_cast<SettingActivity*>(stack.back())) {
+                    brls::Application::popActivity(brls::TransitionAnimation::NONE);
+                    continue;
+                }
+                if (auto* login = dynamic_cast<MineQrLogin*>(stack.back()->getContentView())) {
+                    login->closeLcdLogin();
+                    continue;
+                }
+            }
+        }
         if (key.down && mediaKey(s, key.code)) continue;
         if (key.code == KEY_F10 && key.down) s.quit = true;
         if (key.code >= std::size(linux_scancode_table)) continue;
         const auto code = linux_scancode_table[key.code];
         if (code == SDL_SCANCODE_UNKNOWN) continue;
-        SDL_SendKeyboardKey(key.down ? SDL_PRESSED : SDL_RELEASED, code);
-        const auto symbol = SDL_GetKeyFromScancode(code);
-        if (!key.down || !SDL_IsTextInputActive() || symbol < 32 || symbol > 126) continue;
-        const auto mods = SDL_GetModState();
-        if (mods & (KMOD_CTRL | KMOD_ALT | KMOD_GUI)) continue;
-        char value = static_cast<char>(symbol);
-        if (value >= 'a' && value <= 'z') {
-            if (bool(mods & KMOD_SHIFT) != bool(mods & KMOD_CAPS)) value -= 'a' - 'A';
-        } else if (mods & KMOD_SHIFT) {
-            constexpr std::string_view plain = "1234567890-=[]\\;',./`";
-            constexpr std::string_view shifted = "!@#$%^&*()_+{}|:\"<>?~";
-            auto pos = plain.find(value);
-            if (pos != plain.npos) value = shifted[pos];
+        const char value = printableKey(code);
+        if (key.down && s.lcdLayout && (value || code == SDL_SCANCODE_BACKSPACE)) {
+            const auto stack = brls::Application::getActivitiesStack();
+            auto* search = stack.empty() ? nullptr : dynamic_cast<cm0::LcdSearchActivity*>(stack.back());
+            if (search) {
+                if (value) search->type(value);
+                else search->backspace();
+                continue;
+            }
         }
+        SDL_SendKeyboardKey(key.down ? SDL_PRESSED : SDL_RELEASED, code);
+        if (!key.down || !SDL_IsTextInputActive() || !value) continue;
         char text[] = {value, 0};
         SDL_SendKeyboardText(text);
     }
@@ -291,6 +397,12 @@ void saveFrame(const Session& s) {
     if (!file) throw std::runtime_error("Cannot write " + s.screenshot);
 }
 }
+
+void cm0::setSearchTyping(bool active) {
+    if (session && session->keyboard) cm0::setKeypadFnLock(!active);
+}
+
+bool cm0::compactLayout() { return session && session->lcdLayout; }
 
 bool cm0::usingLcd() {
     return session && session->display && !session->display->usingHdmi();
@@ -326,6 +438,7 @@ void cm0::setVideoFullscreen(bool fullscreen) {
 
 bool cm0::drawVideoPlane(NVGcontext* vg, float x, float y, float w, float h, float alpha) {
     auto& s = *session;
+    s.drewVideoView = true;
     if (!s.native || !s.nativeFrame || !s.fullscreen || alpha < 0.999f) return false;
     const auto& v = s.native->viewport;
     nvgSave(vg);
@@ -343,10 +456,46 @@ bool cm0::drawVideoPlane(NVGcontext* vg, float x, float y, float w, float h, flo
     return true;
 }
 
+cm0::RollingDanmaku cm0::rollingDanmaku(NVGcontext* vg, float x, float y, float w, float h,
+                                     float lineHeight, bool smartMask) {
+    RollingDanmaku result;
+    if (!session || lineHeight <= 0) return result;
+    float transform[6];
+    nvgCurrentTransform(vg, transform);
+    if (transform[0] <= 0 || transform[0] != transform[3] || transform[1] || transform[2])
+        return result;
+    if (usingLcd()) {
+        result.maxLines = 2;
+        result.fontScale = 12.0f / (30 * transform[0]);
+        return result;
+    }
+    auto& s = *session;
+    if (smartMask || width != 640 || !s.drewVideo) return result;
+    result.scale = transform[0] * 2;
+    result.offsetX = transform[4] * 2;
+    result.offsetY = transform[5] * 2;
+    const auto px = [&](float value, float offset) { return int(std::lround(value * result.scale + offset)); };
+    result.clip = {px(x, result.offsetX), px(y, result.offsetY), px(x+w, result.offsetX), px(y+h, result.offsetY)};
+    const int limit = std::min(result.clip[3], DanmakuStrip::height);
+    const float space = limit - px(y+5, result.offsetY);
+    if (space < 40) return result;
+    result.strip = s.native->requestDanmaku();
+    if (result.strip) {
+        result.maxLines = std::max(1, 1 + int((space - 40) / (lineHeight * result.scale)));
+        result.fontScale = 27.0f / (30 * result.scale);
+    }
+    return result;
+}
+
+bool cm0::RollingDanmaku::paint(std::string_view text, float size, uint32_t color,
+                               float alpha, float x, float y) const {
+    return strip && strip->paint(text, std::lround(size * scale), color,
+        std::lround(255 * std::clamp(alpha, 0.0f, 1.0f)),
+        std::lround(x * scale + offsetX), std::lround(y * scale + offsetY), clip);
+}
+
 extern "C" SDL_Window* __wrap_SDL_CreateWindow(const char* title, int x, int y, int, int, Uint32 flags) {
-    // Use the upstream handheld metrics on both outputs to retain the active view on hotplug.
-    brls::Application::ORIGINAL_WINDOW_WIDTH = 960;
-    brls::Application::ORIGINAL_WINDOW_HEIGHT = 544;
+    configureLayoutSize(session->lcdLayout);
     brls::Application::setLimitedFPS(30);
     auto window = __real_SDL_CreateWindow(title, x, y, width, height,
                                           flags & ~(SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_RESIZABLE));
@@ -354,18 +503,21 @@ extern "C" SDL_Window* __wrap_SDL_CreateWindow(const char* title, int x, int y, 
     return window;
 }
 
-// Desktop settings can request a different drawable size. The pbuffer follows the
-// fixed compositor size, while the framebuffer blitter handles physical modes.
+// Only the output selector changes the drawable size. Ignore desktop window preferences.
 extern "C" void __wrap_SDL_SetWindowSize(SDL_Window*, int, int) {}
 extern "C" void __wrap_SDL_SetWindowMinimumSize(SDL_Window*, int, int) {}
 extern "C" void __wrap_SDL_SetWindowMaximumSize(SDL_Window*, int, int) {}
 extern "C" int __wrap_SDL_SetWindowFullscreen(SDL_Window*, Uint32) { return 0; }
 
+// All UI pixels live in the resizable FBO. SDL only needs a current EGL surface.
+extern "C" EGLSurface __wrap_SDL_EGL_CreateOffscreenSurface(SDL_VideoDevice* device, int, int) {
+    return __real_SDL_EGL_CreateOffscreenSurface(device, 1, 1);
+}
+
 extern "C" SDL_GLContext __wrap_SDL_GL_CreateContext(SDL_Window* window) {
     auto context = __real_SDL_GL_CreateContext(window);
     if (!context) throw std::runtime_error(std::string("Cannot create GLES context: ") + SDL_GetError());
-    session->surface = cm0::LinearSurface::create(width, height);
-    std::cerr << "compositor: " << (session->surface ? "linear DMA buffer" : "GLES readback") << '\n';
+    createSurface(*session);
     return context;
 }
 
@@ -426,16 +578,31 @@ extern "C" void __wrap_nvgUpdateImage(NVGcontext* vg, int id, const unsigned cha
 
 extern "C" void __wrap_SDL_GL_SwapWindow(SDL_Window* window) {
     auto& s = *session;
+    const bool fullscreen = std::exchange(s.drewVideoView, false) && s.fullscreen;
+    if (s.drewVideo) s.lastNativeDraw = Clock::now();
+    const bool leavingCompactCanvas = width == 640 && !fullscreen && !s.drewVideo;
+    if (leavingCompactCanvas) {
+        s.lastNativeDraw = {};
+        std::cerr << "HDMI fullscreen exit: waiting for the 1280x720 canvas\n";
+    }
+    if ((s.drewVideo && width > 640) || leavingCompactCanvas) {
+        // Hold the last scanout until the next frame draws into the new canvas.
+        s.drewVideo = s.videoUploaded = false;
+        __real_SDL_GL_SwapWindow(window);
+        return;
+    }
     s.rgb.resize(width * height);
-    if (!s.surface || !s.surface->read(s.rgb)) {
-        s.rgba.resize(width * height * 4);
-        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, s.rgba.data());
-        for (int y = 0; y < height; ++y) {
-            const auto* src = &s.rgba[(height - y - 1) * width * 4];
-            for (int x = 0; x < width; ++x, src += 4)
-                s.rgb[y * width + x] = (uint32_t(src[3]) << 24) | (uint32_t(src[0]) << 16) | (uint32_t(src[1]) << 8) | src[2];
+    if (!s.surface->read(s.rgb)) {
+        // GLES returns bottom-up RGBA. Convert the same allocation to top-down ARGB.
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, s.rgb.data());
+        for (auto& pixel : s.rgb) {
+            const auto* rgba = reinterpret_cast<const unsigned char*>(&pixel);
+            pixel = (uint32_t(rgba[3]) << 24) | (uint32_t(rgba[0]) << 16) | (uint32_t(rgba[1]) << 8) | rgba[2];
         }
-        s.surface.reset();
+        for (int y = 0; y < height / 2; ++y) {
+            auto* row = s.rgb.data() + y * width;
+            std::swap_ranges(row, row + width, s.rgb.data() + (height - 1 - y) * width);
+        }
     }
     if (s.frames++ == 0) s.firstFrame = Clock::now();
     bool presented = false;
@@ -468,7 +635,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--help") {
-            std::cout << "wiliwili for CardputerZero (community port)\n"
+            std::cout << "wiliwili-cpz for CardputerZero\n"
                          "--display auto|lcd|hdmi   --bv BV_ID   --smoke-test FILE.ppm\n"
                          "Arrows: navigate   Enter: select   Esc: back   F10: quit\n";
             return 0;
@@ -498,24 +665,25 @@ int main(int argc, char** argv) {
             state.display = std::make_unique<cm0::Display>(display);
             state.keyboard = std::make_unique<cm0::Keyboard>();
         }
+        state.lcdLayout = state.display ? !state.display->usingHdmi() : display != "hdmi";
+        state.startupLcdLayout = state.lcdLayout;
+        configureCanvas(!state.lcdLayout);
         session = &state;
         selectOutput(state);
         umask(0077); // Settings can contain login cookies.
         setenv("SDL_VIDEODRIVER", "offscreen", 1);
-        setenv("LIBGL_DRIVERS_PATH", "/usr/lib/wiliwili/dri", 0);
-        setenv("GBM_BACKENDS_PATH", "/usr/lib/wiliwili/gbm", 0);
+        setenv("LIBGL_DRIVERS_PATH", "/usr/lib/wiliwili-cpz/dri", 0);
+        setenv("GBM_BACKENDS_PATH", "/usr/lib/wiliwili-cpz/gbm", 0);
         const int result = runClient(static_cast<int>(args.size() - 1), args.data(), bvid);
         session = nullptr;
         if (!screenshot.empty() && !state.saved) return 1;
-        return result;
+        return state.reopen ? 75 : result;
     };
     try {
         if (!screenshot.empty()) return run();
-        int status;
-        do { status = cm0::supervise(run); } while (status == 75 && !cm0::stopping());
-        return status;
+        return cm0::supervise(run);
     } catch (const std::exception& error) {
-        std::cerr << "wiliwili: " << error.what() << '\n';
+        std::cerr << "wiliwili-cpz: " << error.what() << '\n';
         return 1;
     }
 }
