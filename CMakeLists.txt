@@ -3,7 +3,7 @@ project(wiliwili_cm0 LANGUAGES C CXX)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(WILIWILI_INTERNAL_VERSION "v1.6.4")
+set(WILIWILI_INTERNAL_VERSION "v1.6.5")
 set(WILIWILI_MEDIA_OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/build/media" CACHE PATH "Buildroot media output")
 set(WILIWILI_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Root of the wiliwili source checkout")
 
@@ -172,7 +172,7 @@ configure_file(src/danmaku_live.hpp "${live_include}/live/danmaku_live.hpp" COPY
 target_include_directories(wiliwili BEFORE PRIVATE "${player_include}" "${image_include}" "${account_include}"
     "${account_include}/api" "${live_include}" "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set_property(TARGET wiliwili PROPERTY SOURCES "${client_sources}")
-target_sources(wiliwili PRIVATE src/client_main.cpp src/lcd-search-input.cpp src/platform.cpp src/device-runtime.cpp
+target_sources(wiliwili PRIVATE src/client_main.cpp src/lcd-search-input.cpp src/lcd-orientation.cpp src/platform.cpp src/device-runtime.cpp
     src/native-video.cpp src/video-cdn.cpp src/linear-surface.cpp src/danmaku-strip.cpp)
 target_include_directories(wiliwili PRIVATE "${sdl}/src/events")
 target_sources(wiliwili PRIVATE src/account-store.cpp src/account-http.cpp src/account-sync.cpp src/account-network.cpp)

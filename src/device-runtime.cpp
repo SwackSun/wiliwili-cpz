@@ -354,6 +354,7 @@ struct Display::State {
 
     std::string choice;
     Backlight backlight;
+    std::vector<std::uint32_t> rotated;
     std::unique_ptr<Framebuffer> framebuffer;
     bool usingHdmi = false;
 };
@@ -375,19 +376,30 @@ bool Display::update() {
     return state_->select(false);
 }
 
-void Display::present(const std::vector<std::uint32_t>& rgb, int width, int height) {
-    state_->framebuffer->draw(rgb, width, height);
+void Display::present(const std::vector<std::uint32_t>& rgb, int width, int height, TopEdge edge) {
+    if (usingHdmi() || edge == TopEdge::Top) {
+        state_->framebuffer->draw(rgb, width, height);
+        return;
+    }
+    rotateLcdFrame(rgb, width, height, edge, state_->rotated);
+    if (portrait(edge)) std::swap(width, height);
+    state_->framebuffer->draw(state_->rotated, width, height);
 }
 
 bool Display::usingHdmi() const { return state_->usingHdmi; }
 
 struct Keyboard::State {
+    // Clockwise order matches TopEdge. Convert a physical direction back to UI coordinates.
+    static constexpr std::array<unsigned, 4> arrows{KEY_UP, KEY_RIGHT, KEY_DOWN, KEY_LEFT};
+
     struct Device {
         explicit Device(fs::path devicePath)
             : path(std::move(devicePath)), fd(open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC)) {}
         fs::path path;
         File fd;
         std::array<bool, KEY_CNT> down{};
+        std::array<unsigned, arrows.size()> heldArrow{};
+        bool builtIn = false;
         bool syncing = false;
     };
 
@@ -413,6 +425,7 @@ struct Keyboard::State {
                 continue;
             }
             if (ioctl(device->fd.get(), EVIOCGRAB, 1) == 0) {
+                device->builtIn = firstLine(fs::path("/sys/class/input") / path.filename() / "device/name") == "tca8418c";
                 std::cerr << "keyboard: " << device->path << '\n';
                 devices.push_back(std::move(device));
             }
@@ -420,13 +433,24 @@ struct Keyboard::State {
         nextScan = Clock::now() + std::chrono::seconds(1);
     }
 
-    static void send(Device& device, unsigned code, bool down, std::vector<KeyEvent>& events) {
+    void send(Device& device, unsigned code, bool down, std::vector<KeyEvent>& events) {
         if (device.down[code] == down) return;
         device.down[code] = down;
+        const auto arrow = std::find(arrows.begin(), arrows.end(), code);
+        if (arrow != arrows.end()) {
+            const unsigned physical = arrow - arrows.begin();
+            auto& logical = device.heldArrow[physical];
+            // A release must match its press even after rotation, hotplug or lost events.
+            if (down) {
+                logical = device.builtIn ? (physical + arrows.size() - unsigned(edge)) % arrows.size() : physical;
+                if (++arrowHolders[logical] > 1) return;
+            } else if (--arrowHolders[logical] > 0) return;
+            code = arrows[logical];
+        }
         events.push_back({code, down});
     }
 
-    static bool drain(Device& device, std::vector<KeyEvent>& events) {
+    bool drain(Device& device, std::vector<KeyEvent>& events) {
         input_event input{};
         for (;;) {
             const auto received = read(device.fd.get(), &input, sizeof(input));
@@ -451,6 +475,8 @@ struct Keyboard::State {
     }
 
     std::vector<std::unique_ptr<Device>> devices;
+    TopEdge edge = TopEdge::Top;
+    std::array<unsigned, arrows.size()> arrowHolders{};
     std::map<fs::path, std::pair<dev_t, ino_t>> ignored;
     Clock::time_point nextScan{};
 };
@@ -462,14 +488,15 @@ Keyboard::Keyboard() : state_(std::make_unique<State>()) {
 
 Keyboard::~Keyboard() = default;
 
-std::vector<KeyEvent> Keyboard::poll() {
+std::vector<KeyEvent> Keyboard::poll(TopEdge edge) {
     std::vector<KeyEvent> events;
+    state_->edge = edge;
     auto& devices = state_->devices;
     for (auto it = devices.begin(); it != devices.end();) {
-        if (State::drain(**it, events)) {
+        if (state_->drain(**it, events)) {
             ++it;
         } else {
-            for (unsigned code = 0; code < KEY_CNT; ++code) State::send(**it, code, false, events);
+            for (unsigned code = 0; code < KEY_CNT; ++code) state_->send(**it, code, false, events);
             it = devices.erase(it);
         }
     }
@@ -526,6 +553,7 @@ int supervise(const std::function<int()>& client) {
     stopRequested = 0;
     Console console;
     Backlight backlight;
+    std::vector<std::uint32_t> rotated;
     for (int signal : {SIGINT, SIGTERM, SIGHUP}) std::signal(signal, requestStop);
     setKeypadFnLock(true);
     int status;

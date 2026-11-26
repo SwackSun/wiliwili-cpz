@@ -1,5 +1,7 @@
 #pragma once
 
+#include "lcd-orientation.hpp"
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -17,7 +19,7 @@ class Keyboard {
 public:
     Keyboard();
     ~Keyboard();
-    std::vector<KeyEvent> poll();
+    std::vector<KeyEvent> poll(TopEdge edge = TopEdge::Top);
 
 private:
     struct State;
@@ -29,7 +31,7 @@ public:
     explicit Display(std::string choice);
     ~Display();
     bool update();
-    void present(const std::vector<std::uint32_t>& rgb, int width, int height);
+    void present(const std::vector<std::uint32_t>& rgb, int width, int height, TopEdge edge);
     bool usingHdmi() const;
 
 private:

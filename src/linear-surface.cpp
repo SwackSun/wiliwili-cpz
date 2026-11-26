@@ -37,7 +37,8 @@ bool syncBuffer(int fd, uint64_t flags) {
 }
 
 LinearSurface::LinearSurface(int width, int height)
-    : width_(width), height_(height), stride_((width + 63) / 64 * 64),
+    // VC4 writes linear ARGB8888 render targets in rows aligned to four pixels.
+    : width_(width), height_(height), stride_((width + 3) / 4 * 4),
       length_(size_t(stride_) * ((height + 63) / 64 * 64) * sizeof(uint32_t)),
       mapping_(MAP_FAILED), context_(eglGetCurrentContext()) {}
 

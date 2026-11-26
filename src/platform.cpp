@@ -80,6 +80,7 @@ void applyGain(mpv_handle* player, PlaybackGain gain) {
 }
 
 struct Session {
+    cm0::LcdOrientation orientation;
     std::unique_ptr<cm0::Display> display;
     std::unique_ptr<cm0::Keyboard> keyboard;
     std::unique_ptr<cm0::LinearSurface> surface;
@@ -266,14 +267,20 @@ char printableKey(SDL_Scancode code) {
     return value;
 }
 
-void configureCanvas(bool hdmi, bool videoControls = false) {
+void configureCanvas(bool hdmi, bool videoControls, cm0::TopEdge edge) {
     width = hdmi ? (videoControls ? 640 : 1280) : 320;
     height = hdmi ? (videoControls ? 360 : 720) : 170;
+    if (!hdmi && cm0::portrait(edge)) std::swap(width, height);
 }
 
-void configureLayoutSize(bool lcd) {
+void configureLayoutSize(bool lcd, cm0::TopEdge edge) {
     brls::Application::ORIGINAL_WINDOW_WIDTH = lcd ? 544 : 960;
     brls::Application::ORIGINAL_WINDOW_HEIGHT = lcd ? 289 : 540;
+    if (lcd && cm0::portrait(edge)) {
+        // Reserve enough logical width for the sidebar and all four home actions.
+        brls::Application::ORIGINAL_WINDOW_WIDTH = 360;
+        brls::Application::ORIGINAL_WINDOW_HEIGHT = 678;
+    }
 }
 
 void createSurface(Session& s) {
@@ -287,7 +294,7 @@ void createSurface(Session& s) {
 
 void resizeCanvas(Session& s, bool hdmi, bool controls) {
     const int previousWidth = width;
-    configureCanvas(hdmi, controls);
+    configureCanvas(hdmi, controls, s.orientation.edge());
     if (width == previousWidth) return;
     createSurface(s);
     __real_SDL_SetWindowSize(SDL_GL_GetCurrentWindow(), width, height);
@@ -304,7 +311,8 @@ void pollDevice() {
         if (s.display->update()) {
             if (wasHdmi != s.display->usingHdmi()) {
                 s.lcdLayout = !s.display->usingHdmi();
-                configureLayoutSize(s.lcdLayout);
+                s.orientation = {};
+                configureLayoutSize(s.lcdLayout, s.orientation.edge());
                 if (stack.empty()) s.startupLcdLayout = s.lcdLayout;
                 else cm0::setClientDisplayLayout(s.lcdLayout);
                 s.native.reset();
@@ -324,7 +332,7 @@ void pollDevice() {
                 }
             } else {
                 selectOutput(s);
-                if (!s.rgb.empty()) s.display->present(s.rgb, width, height);
+                if (!s.rgb.empty()) s.display->present(s.rgb, width, height, s.orientation.edge());
             }
         }
         // The player can update its existing controls. Browsing layouts can
@@ -344,6 +352,11 @@ void pollDevice() {
         configureAudio(s);
         s.nextProbe = now + std::chrono::milliseconds(250);
     }
+    if (s.surface && s.lcdLayout && s.orientation.poll(now)) {
+        configureLayoutSize(true, s.orientation.edge());
+        resizeCanvas(s, false, false);
+        brls::Application::setActiveEvent(true);
+    }
     if (s.display && s.display->usingHdmi() && !s.quit) {
         // Avoid resizing for a single missing video frame, e.g. during a seek.
         const bool controls = s.native && s.lastNativeDraw != Clock::time_point{} &&
@@ -351,7 +364,8 @@ void pollDevice() {
         resizeCanvas(s, true, controls);
     }
     if (!s.keyboard) return;
-    for (auto key : s.keyboard->poll()) {
+    const auto inputEdge = s.lcdLayout ? s.orientation.edge() : cm0::TopEdge::Top;
+    for (auto key : s.keyboard->poll(inputEdge)) {
         if (key.down && s.lcdLayout) {
             const auto stack = brls::Application::getActivitiesStack();
             if (!stack.empty()) {
@@ -495,7 +509,7 @@ bool cm0::RollingDanmaku::paint(std::string_view text, float size, uint32_t colo
 }
 
 extern "C" SDL_Window* __wrap_SDL_CreateWindow(const char* title, int x, int y, int, int, Uint32 flags) {
-    configureLayoutSize(session->lcdLayout);
+    configureLayoutSize(session->lcdLayout, session->orientation.edge());
     brls::Application::setLimitedFPS(30);
     auto window = __real_SDL_CreateWindow(title, x, y, width, height,
                                           flags & ~(SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_RESIZABLE));
@@ -618,7 +632,7 @@ extern "C" void __wrap_SDL_GL_SwapWindow(SDL_Window* window) {
         } else s.native->hide();
     }
     s.drewVideo = false;
-    if (s.display && !presented) s.display->present(s.rgb, width, height);
+    if (s.display && !presented) s.display->present(s.rgb, width, height, s.orientation.edge());
     if (!s.screenshot.empty() && s.frames >= 3 && Clock::now() - s.firstFrame >= std::chrono::seconds(2) &&
         (!s.waitForVideo || (s.videoUploaded && MPVCore::instance().playback_time >= 1.0))) {
         saveFrame(s);
@@ -667,7 +681,7 @@ int main(int argc, char** argv) {
         }
         state.lcdLayout = state.display ? !state.display->usingHdmi() : display != "hdmi";
         state.startupLcdLayout = state.lcdLayout;
-        configureCanvas(!state.lcdLayout);
+        configureCanvas(!state.lcdLayout, false, state.orientation.edge());
         session = &state;
         selectOutput(state);
         umask(0077); // Settings can contain login cookies.
