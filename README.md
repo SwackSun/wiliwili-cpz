@@ -2,7 +2,7 @@
 
 Community port of [xfangfang's wiliwili](https://github.com/xfangfang/wiliwili) v1.6.0 for M5Stack CardputerZero running czlite. The port adds LCD and HDMI display handling, a VideoCore IV playback path, and CardputerZero keyboard shortcuts. Port changes date from 2026-11-18. See the [device guide](USAGE.md) for controls.
 
-Public releases use Git tags in the `vX.Y.Z` format and IPK versions in the `X.Y.Z` format. The build records its internal revision as `vX.Y.Z.rcN` in [CMakeLists.txt](CMakeLists.txt).
+The Git tag and application version are both `vX.Y.Z` for a stable release. The IPK version is `X.Y.Z`. A release cycle starts at `vX.Y.Z.rc1` and increments the RC number for each candidate. The candidate tags for that version can be removed after the stable release. The next release cycle increments the patch number and begins at `rc1`. The application version is recorded in [CMakeLists.txt](CMakeLists.txt).
 
 ## Build for local development
 
