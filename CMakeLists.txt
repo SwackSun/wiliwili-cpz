@@ -3,8 +3,7 @@ project(wiliwili_cm0 LANGUAGES C CXX)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(WILIWILI_INTERNAL_VERSION "v1.6.3")
-option(WILIWILI_UPSTREAM_ART "Use the original artwork from the upstream checkout" OFF)
+set(WILIWILI_INTERNAL_VERSION "v1.6.4")
 set(WILIWILI_MEDIA_OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/build/media" CACHE PATH "Buildroot media output")
 set(WILIWILI_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Root of the wiliwili source checkout")
 
@@ -53,16 +52,15 @@ set(port_resources "${CMAKE_CURRENT_BINARY_DIR}/cardputerzero-resources")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${art}/generate.py" "${art}/lcd_layouts.py" "${art}/icons.json" "${art}/LUCIDE-LICENSE"
     "${art}/FEATHER-LICENSE" "${art}/NOTO-EMOJI-OFL" "${art}/NOTICE.md")
-set(art_python "${Python3_EXECUTABLE}")
-if(WILIWILI_UPSTREAM_ART)
-    # The SDK Python has no Pillow. Use the build host's interpreter for artwork.
-    find_program(host_art_python NAMES python3 PATHS ENV PATH NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
-    set(art_python "${host_art_python}")
-    set(art_options --upstream-art)
-endif()
+# All builds use the device artwork, including builds with older CMake caches.
+find_program(host_art_python NAMES python3 PATHS ENV PATH NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+file(GLOB_RECURSE artwork_inputs CONFIGURE_DEPENDS
+    "${upstream_checkout}/resources/svg/*.svg" "${upstream_checkout}/resources/icon/*.png"
+    "${upstream_checkout}/resources/img/*.png" "${upstream_checkout}/resources/pictures/*.png")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${artwork_inputs})
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${art}/lcd-search.xml" "${art}/lcd-tv-search.xml" "${art}/lcd-main.xml" "${art}/lcd-home.xml" "${art}/lcd-qr.xml" "${art}/lcd-recommends.xml")
-execute_process(COMMAND "${art_python}" -B "${art}/generate.py" ${art_options}
+execute_process(COMMAND "${host_art_python}" -B "${art}/generate.py" --upstream-art
     "${upstream_checkout}/resources" "${port_resources}" COMMAND_ERROR_IS_FATAL ANY)
 file(CREATE_LINK "${port_resources}" "${upstream}/resources" SYMBOLIC)
 foreach(dir borealis cpr OpenCC QR-Code-generator pystring lunasvg MemoryModule)
@@ -196,7 +194,8 @@ install(CODE [[
     # Clear copies installed by earlier versions when reusing a package staging tree.
     if(NOT "$ENV{DESTDIR}" STREQUAL "")
         set(legacy_resources "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/wiliwili-cpz/resources")
-        file(REMOVE "${legacy_resources}/font/keymap_xbox.ttf" "${legacy_resources}/font/keymap_ps.ttf"
+        file(REMOVE "${legacy_resources}/LUCIDE-LICENSE" "${legacy_resources}/FEATHER-LICENSE"
+            "${legacy_resources}/font/keymap_xbox.ttf" "${legacy_resources}/font/keymap_ps.ttf"
             "${legacy_resources}/font/FREEWARE.txt" "${legacy_resources}/icon/icon.jpg"
             "${legacy_resources}/icon/logo.gif")
         foreach(theme light dark)

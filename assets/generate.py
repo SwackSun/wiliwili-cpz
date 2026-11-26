@@ -178,7 +178,10 @@ def copy_compact_art(upstream, target):
         for suffix, width, height in COIN_STRIPS:
             limits[f'pictures/{mascot}-coin-ani{suffix}.png'] = (width, height)
     for dirname in ('icon', 'img', 'pictures'):
-        for source in (upstream / dirname).rglob('*.png'):
+        sources = sorted((upstream / dirname).rglob('*.png'))
+        if not sources:
+            raise FileNotFoundError(f'Missing upstream PNG artwork in {upstream / dirname}')
+        for source in sources:
             relative = source.relative_to(upstream)
             if 'backup' in relative.parts:
                 continue

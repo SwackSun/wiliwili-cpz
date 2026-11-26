@@ -6,7 +6,7 @@ The Git tag and application version are both `vX.Y.Z` for a stable release. The 
 
 ## Build for local development
 
-Use a Linux host with the Buildroot host dependencies, Git, curl, Python 3 and CMake 3.25 or newer. Set `CM0_BUILDROOT_OUTPUT` to the absolute path of a matching czlite Buildroot output with its host toolchain and `.config`. Install patchelf on the host if the SDK lacks it. Use a checkout path without spaces.
+Use a Linux host with the Buildroot host dependencies, Git, curl, Python 3 with Pillow and CMake 3.25 or newer. Set `CM0_BUILDROOT_OUTPUT` to the absolute path of a matching czlite Buildroot output with its host toolchain and `.config`. Install patchelf on the host if the SDK lacks it. Use a checkout path without spaces.
 
 From the root of this checkout, fetch the pinned upstream revision and the recursive submodules used by the port. The upstream repository and each submodule carry their own notices and terms.
 
@@ -37,7 +37,7 @@ The wiliwili application and CardputerZero board integration use GPLv3. The appl
 
 The media patch applies to mpv 0.40.0. Its new frame header carries an LGPL-2.1-or-later notice. The patched public render header carries the mpv developers' ISC notice. The mpv source archive identifies the terms for the renderer and build files. [mpv copyright and license texts](LICENSES/mpv-0.40.0/)
 
-Live chat uses libcurl's WSS client. The CardputerZero build omits DLNA casting, Mongoose, libpdr, and the Xbox and PlayStation controller fonts. Existing controller theme settings fall back to keyboard hints. A user-provided `icon.ttf` can still override them. The release uses original CardputerZero illustrations and Lucide symbols. [Resource notices](assets/NOTICE.md) · [libcurl license](https://curl.se/docs/copyright.html)
+Live chat uses libcurl's WSS client. The CardputerZero build omits DLNA casting, Mongoose, libpdr, and the Xbox and PlayStation controller fonts. Existing controller theme settings fall back to keyboard hints. A user-provided `icon.ttf` can still override them. Device and release builds both use the SVGs and resized PNGs from the pinned upstream revision. [Resource notices](assets/NOTICE.md) · [libcurl license](https://curl.se/docs/copyright.html)
 
 The corresponding source archive alongside the release IPK contains the pinned upstream and library sources, port and media patches, and build and installation instructions. The license describes equivalent source access under section 6(d). [Application license](LICENSE)
 
